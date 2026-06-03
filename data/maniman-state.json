@@ -1,0 +1,379 @@
+{
+  "version": 2,
+  "settings": {
+    "currency": "INR",
+    "selectedMonth": "2026-06",
+    "lastView": "settings"
+  },
+  "accountCategories": [
+    {
+      "id": "acctcat_savings",
+      "name": "Savings Account",
+      "kind": "payment",
+      "color": "#0f766e"
+    },
+    {
+      "id": "acctcat_credit",
+      "name": "Credit Card",
+      "kind": "payment",
+      "color": "#b63a2d"
+    },
+    {
+      "id": "acctcat_wallet",
+      "name": "Wallet/Top Up",
+      "kind": "payment",
+      "color": "#cc8b13"
+    },
+    {
+      "id": "acctcat_cash",
+      "name": "Cash",
+      "kind": "payment",
+      "color": "#5c7d2b"
+    },
+    {
+      "id": "acctcat_fd",
+      "name": "FD",
+      "kind": "asset",
+      "color": "#4d69c8"
+    },
+    {
+      "id": "acctcat_rd",
+      "name": "RD",
+      "kind": "asset",
+      "color": "#7a5ab7"
+    },
+    {
+      "id": "acctcat_stocks",
+      "name": "Stocks",
+      "kind": "asset",
+      "color": "#c05c91"
+    },
+    {
+      "id": "acctcat_mutual_funds",
+      "name": "Mutual Funds",
+      "kind": "asset",
+      "color": "#0e8a9a"
+    }
+  ],
+  "accounts": [
+    {
+      "id": "acct_savings_main",
+      "name": "Main Savings",
+      "categoryId": "acctcat_savings",
+      "openingBalance": 0,
+      "color": "#0f766e"
+    },
+    {
+      "id": "acct_credit_visa",
+      "name": "Visa Card",
+      "categoryId": "acctcat_credit",
+      "openingBalance": 0,
+      "color": "#b63a2d"
+    },
+    {
+      "id": "acct_cash",
+      "name": "Cash",
+      "categoryId": "acctcat_cash",
+      "openingBalance": 0,
+      "color": "#5c7d2b"
+    },
+    {
+      "id": "acct_mf_portfolio",
+      "name": "Index Fund",
+      "categoryId": "acctcat_mutual_funds",
+      "openingBalance": 0,
+      "color": "#0e8a9a"
+    }
+  ],
+  "transactions": [],
+  "transactionCategories": [
+    {
+      "id": "cat_food",
+      "type": "expense",
+      "name": "Food",
+      "color": "#d45f4c",
+      "keywords": [
+        "coffee",
+        "lunch",
+        "dinner",
+        "food",
+        "restaurant",
+        "snack",
+        "cafe"
+      ]
+    },
+    {
+      "id": "cat_groceries",
+      "type": "expense",
+      "name": "Groceries",
+      "color": "#239a6b",
+      "keywords": [
+        "grocery",
+        "groceries",
+        "market",
+        "milk",
+        "vegetables",
+        "fruit"
+      ]
+    },
+    {
+      "id": "cat_transport",
+      "type": "expense",
+      "name": "Transport",
+      "color": "#4d69c8",
+      "keywords": [
+        "uber",
+        "taxi",
+        "fuel",
+        "gas",
+        "metro",
+        "bus",
+        "train",
+        "parking"
+      ]
+    },
+    {
+      "id": "cat_home",
+      "type": "expense",
+      "name": "Home",
+      "color": "#7a5ab7",
+      "keywords": [
+        "rent",
+        "repair",
+        "home",
+        "furniture",
+        "cleaning"
+      ]
+    },
+    {
+      "id": "cat_bills",
+      "type": "expense",
+      "name": "Bills",
+      "color": "#cc8b13",
+      "keywords": [
+        "bill",
+        "electric",
+        "water",
+        "internet",
+        "phone",
+        "subscription",
+        "netflix"
+      ]
+    },
+    {
+      "id": "cat_shopping",
+      "type": "expense",
+      "name": "Shopping",
+      "color": "#c05c91",
+      "keywords": [
+        "shopping",
+        "clothes",
+        "amazon",
+        "store",
+        "shoes"
+      ]
+    },
+    {
+      "id": "cat_health",
+      "type": "expense",
+      "name": "Health",
+      "color": "#0e8a9a",
+      "keywords": [
+        "doctor",
+        "medicine",
+        "pharmacy",
+        "health",
+        "gym"
+      ]
+    },
+    {
+      "id": "cat_travel",
+      "type": "expense",
+      "name": "Travel",
+      "color": "#d17431",
+      "keywords": [
+        "flight",
+        "hotel",
+        "trip",
+        "travel"
+      ]
+    },
+    {
+      "id": "cat_entertainment",
+      "type": "expense",
+      "name": "Entertainment",
+      "color": "#5c7d2b",
+      "keywords": [
+        "movie",
+        "game",
+        "concert",
+        "music",
+        "book"
+      ]
+    },
+    {
+      "id": "cat_other_expense",
+      "type": "expense",
+      "name": "Other",
+      "color": "#6b7280",
+      "keywords": []
+    },
+    {
+      "id": "cat_salary",
+      "type": "income",
+      "name": "Salary",
+      "color": "#239a6b",
+      "keywords": [
+        "salary",
+        "paycheck",
+        "payroll",
+        "wage"
+      ]
+    },
+    {
+      "id": "cat_freelance",
+      "type": "income",
+      "name": "Freelance",
+      "color": "#0f766e",
+      "keywords": [
+        "client",
+        "freelance",
+        "invoice",
+        "project"
+      ]
+    },
+    {
+      "id": "cat_gift",
+      "type": "income",
+      "name": "Gift",
+      "color": "#7a5ab7",
+      "keywords": [
+        "gift",
+        "bonus"
+      ]
+    },
+    {
+      "id": "cat_refund",
+      "type": "income",
+      "name": "Refund",
+      "color": "#4d69c8",
+      "keywords": [
+        "refund",
+        "reimburse",
+        "cashback"
+      ]
+    },
+    {
+      "id": "cat_interest",
+      "type": "income",
+      "name": "Interest",
+      "color": "#cc8b13",
+      "keywords": [
+        "interest",
+        "dividend"
+      ]
+    },
+    {
+      "id": "cat_other_income",
+      "type": "income",
+      "name": "Other",
+      "color": "#6b7280",
+      "keywords": []
+    }
+  ],
+  "tags": [
+    {
+      "id": "tag_food",
+      "name": "food",
+      "color": "#d45f4c",
+      "keywords": [
+        "coffee",
+        "lunch",
+        "dinner",
+        "restaurant",
+        "cafe",
+        "snack"
+      ]
+    },
+    {
+      "id": "tag_commute",
+      "name": "commute",
+      "color": "#4d69c8",
+      "keywords": [
+        "uber",
+        "taxi",
+        "metro",
+        "bus",
+        "train",
+        "fuel",
+        "parking"
+      ]
+    },
+    {
+      "id": "tag_household",
+      "name": "household",
+      "color": "#7a5ab7",
+      "keywords": [
+        "rent",
+        "grocery",
+        "home",
+        "cleaning",
+        "electric",
+        "water"
+      ]
+    },
+    {
+      "id": "tag_subscription",
+      "name": "subscription",
+      "color": "#cc8b13",
+      "keywords": [
+        "subscription",
+        "netflix",
+        "spotify",
+        "prime",
+        "internet",
+        "phone"
+      ]
+    },
+    {
+      "id": "tag_health",
+      "name": "health",
+      "color": "#0e8a9a",
+      "keywords": [
+        "doctor",
+        "medicine",
+        "pharmacy",
+        "gym",
+        "health"
+      ]
+    },
+    {
+      "id": "tag_investment",
+      "name": "investment",
+      "color": "#239a6b",
+      "keywords": [
+        "fd",
+        "rd",
+        "stocks",
+        "mutual",
+        "sip",
+        "fund",
+        "investment"
+      ]
+    },
+    {
+      "id": "tag_travel",
+      "name": "travel",
+      "color": "#d17431",
+      "keywords": [
+        "flight",
+        "hotel",
+        "trip",
+        "travel"
+      ]
+    }
+  ],
+  "budgets": [],
+  "goals": [],
+  "bills": []
+}

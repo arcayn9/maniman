@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Maniman">
+  <rect width="512" height="512" rx="104" fill="#0f766e"/>
+  <path fill="#f7faf9" d="M112 344V168h62l82 94 82-94h62v176h-58V248l-70 78h-32l-70-78v96h-58Z"/>
+  <path fill="#f2a83b" d="M112 392h288v36H112z"/>
+</svg>

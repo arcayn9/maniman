@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f766e">
+    <meta name="description" content="Maniman is a local-first, mobile-first money manager.">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icons/maniman-icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icons/maniman-icon.svg">
+    <title>Maniman - Money Manager</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="config.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar" aria-label="App navigation">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">MM</div>
+          <div>
+            <strong>Maniman</strong>
+            <span>Mobile money manager</span>
+          </div>
+        </div>
+
+        <nav class="nav-list" aria-label="Primary">
+          <button class="nav-item is-active" type="button" data-view="dashboard">
+            <span aria-hidden="true">D</span>
+            Dashboard
+          </button>
+          <button class="nav-item" type="button" data-view="transactions">
+            <span aria-hidden="true">T</span>
+            Transactions
+          </button>
+          <button class="nav-item" type="button" data-view="budgets">
+            <span aria-hidden="true">B</span>
+            Budgets
+          </button>
+          <button class="nav-item" type="button" data-view="accounts">
+            <span aria-hidden="true">A</span>
+            Accounts
+          </button>
+          <button class="nav-item" type="button" data-view="stats">
+            <span aria-hidden="true">I</span>
+            Insights
+          </button>
+          <button class="nav-item" type="button" data-view="goals">
+            <span aria-hidden="true">G</span>
+            Goals
+          </button>
+          <button class="nav-item" type="button" data-view="bills">
+            <span aria-hidden="true">P</span>
+            Bills
+          </button>
+          <button class="nav-item" type="button" data-view="settings">
+            <span aria-hidden="true">S</span>
+            Settings
+          </button>
+        </nav>
+
+        <div class="local-badge">
+          <span class="status-dot" aria-hidden="true"></span>
+          Saved on this device
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="topbar-group">
+            <label class="field-label" for="monthPicker">Month</label>
+            <input id="monthPicker" class="control compact" type="month">
+          </div>
+          <div class="topbar-actions">
+            <label class="field-label sr-only" for="currencySelect">Currency</label>
+            <select id="currencySelect" class="control compact" aria-label="Currency">
+              <option value="USD">USD</option>
+              <option value="INR">INR</option>
+              <option value="EUR">EUR</option>
+              <option value="GBP">GBP</option>
+              <option value="AUD">AUD</option>
+              <option value="CAD">CAD</option>
+              <option value="SGD">SGD</option>
+            </select>
+            <button id="exportBtn" class="button ghost" type="button">Export</button>
+            <label class="button ghost file-button" for="importFile">Import</label>
+            <input id="importFile" class="sr-only" type="file" accept="application/json,.json">
+          </div>
+          <details class="topbar-menu">
+            <summary class="button ghost">Options</summary>
+            <div class="topbar-menu-panel">
+              <label class="field">
+                <span class="field-label">Currency</span>
+                <select id="mobileCurrencySelect" class="control" aria-label="Currency">
+                  <option value="USD">USD</option>
+                  <option value="INR">INR</option>
+                  <option value="EUR">EUR</option>
+                  <option value="GBP">GBP</option>
+                  <option value="AUD">AUD</option>
+                  <option value="CAD">CAD</option>
+                  <option value="SGD">SGD</option>
+                </select>
+              </label>
+              <button id="mobileExportBtn" class="button ghost" type="button">Export</button>
+              <label class="button ghost file-button" for="mobileImportFile">Import</label>
+              <input id="mobileImportFile" class="sr-only" type="file" accept="application/json,.json">
+            </div>
+          </details>
+        </header>
+
+        <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+        <section id="viewRoot" class="view-root" aria-live="polite"></section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

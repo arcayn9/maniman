@@ -1,0 +1,19 @@
+{
+  "name": "Maniman",
+  "short_name": "Maniman",
+  "description": "A mobile-first money manager for local and cloud-synced personal finance.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#f4f6f8",
+  "theme_color": "#0f766e",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "icons/maniman-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
