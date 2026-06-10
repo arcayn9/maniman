@@ -482,7 +482,8 @@ function normalizeBalanceCheckpoints(checkpoints) {
       balance,
       position,
       source,
-      note: checkpoint.note || ""
+      note: checkpoint.note || "",
+      importBatchId: checkpoint.importBatchId || ""
     });
   });
   return Array.from(byKey.values()).sort(compareCheckpointsAsc);
@@ -503,7 +504,8 @@ function normalizeTransactions(transactions, accounts) {
       date: tx.date || todayIso(),
       note: tx.note || "",
       tags: Array.isArray(tx.tags) ? tx.tags : normalizeTagInput(tx.tags || ""),
-      billId: tx.billId || null
+      billId: tx.billId || null,
+      importBatchId: tx.importBatchId || ""
     };
   }).filter((tx) => tx.amount > 0 && tx.accountId);
 }
@@ -1562,7 +1564,7 @@ function bindTransactionEvents() {
       return matchesQuery && matchesType && matchesAccount;
     });
     const list = document.querySelector("#transactionList");
-    list.innerHTML = filtered.length ? filtered.map(renderTransactionRow).join("") : emptyState("No matching entries.");
+    list.innerHTML = filtered.length ? filtered.map((tx) => renderTransactionRow(tx, accountValue === "all" ? "" : accountValue)).join("") : emptyState("No matching entries.");
     bindTransactionRowActions(list);
   };
 
@@ -1619,7 +1621,8 @@ function transactionFromForm() {
     date,
     note,
     tags,
-    billId: null
+    billId: null,
+    importBatchId: ""
   };
 }
 
@@ -1758,6 +1761,19 @@ function bindAccountEvents() {
       state.accounts = state.accounts.filter((account) => account.id !== accountId);
       selectedActivityAccountId = state.accounts[0]?.id || "";
       saveState();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-checkpoint]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const removed = removeBalanceCheckpoint(button.dataset.checkpointAccount, button.dataset.deleteCheckpoint);
+      if (!removed) {
+        showToast("Checkpoint was not found.");
+        return;
+      }
+      saveState();
+      showToast("Balance checkpoint removed.");
       render();
     });
   });
@@ -2038,11 +2054,10 @@ function renderTrendChart(rows) {
   `;
 }
 
-function renderTransactionRow(tx) {
+function renderTransactionRow(tx, accountContextId = "") {
   const from = findAccount(tx.accountId);
   const to = findAccount(tx.toAccountId);
-  const sign = tx.type === "income" ? "+" : tx.type === "expense" ? "-" : "";
-  const amountClass = tx.type === "transfer" ? "" : tx.type;
+  const display = transactionAmountDisplay(tx, accountContextId);
   const accountText = tx.type === "transfer" ? `${from?.name || "Account"} -> ${to?.name || "Account"}` : from?.name || "Account";
 
   return `
@@ -2061,12 +2076,24 @@ function renderTransactionRow(tx) {
         </div>
       </div>
       <div class="row-actions">
-        <span class="amount ${amountClass}">${sign}${formatMoney(tx.amount)}</span>
+        <span class="amount ${display.amountClass}">${display.sign}${formatMoney(tx.amount)}</span>
         <button class="button ghost small" type="button" data-edit-transaction="${tx.id}">Edit</button>
         <button class="button ghost small" type="button" data-delete-transaction="${tx.id}">Delete</button>
       </div>
     </div>
   `;
+}
+
+function transactionAmountDisplay(tx, accountContextId = "") {
+  if (tx.type === "transfer") {
+    if (accountContextId && tx.toAccountId === accountContextId) return { sign: "+", amountClass: "income" };
+    if (accountContextId && tx.accountId === accountContextId) return { sign: "-", amountClass: "expense" };
+    return { sign: "", amountClass: "" };
+  }
+  return {
+    sign: tx.type === "income" ? "+" : "-",
+    amountClass: tx.type === "income" ? "income" : "expense"
+  };
 }
 
 function renderPreviewItem(tx) {
@@ -2125,6 +2152,7 @@ function renderAccountGroup(category) {
 function renderAccountRow(account) {
   const category = findAccountCategory(account.categoryId);
   const checkpoint = latestBalanceCheckpoint(account.id);
+  const canDeleteCheckpoint = checkpoint && checkpoint.source !== "account_created";
   return `
     <div class="account-row">
       <div>
@@ -2139,6 +2167,7 @@ function renderAccountRow(account) {
       </div>
       <div class="row-actions">
         <span class="amount">${formatMoney(accountBalance(account.id))}</span>
+        ${canDeleteCheckpoint ? `<button class="button ghost small" type="button" data-delete-checkpoint="${checkpoint.id}" data-checkpoint-account="${account.id}">Remove checkpoint</button>` : ""}
         <button class="button ghost small" type="button" data-delete-account="${account.id}">Delete</button>
       </div>
     </div>
@@ -2171,8 +2200,8 @@ function renderAccountActivity(accountId) {
 
 function movementForAccount(tx, accountId) {
   if (tx.type === "transfer") {
-    if (tx.accountId === accountId) return { ...tx, amount: -tx.amount, kind: "Transfer out" };
-    if (tx.toAccountId === accountId) return { ...tx, amount: tx.amount, kind: "Transfer in" };
+    if (tx.accountId === accountId) return { ...tx, amount: -tx.amount, kind: "Transfer debit" };
+    if (tx.toAccountId === accountId) return { ...tx, amount: tx.amount, kind: "Transfer credit" };
     return null;
   }
   if (tx.accountId !== accountId) return null;
@@ -2343,13 +2372,21 @@ function parseQuickEntry(part, options = {}) {
     date,
     note: "",
     tags,
-    billId: null
+    billId: null,
+    importBatchId: ""
   };
 }
 
 function importTransactionText(text, fileName = "", options = {}) {
   const result = parseTransactionUpload(text, fileName, options);
   const { unique, skipped } = uniqueTransactions(result.transactions);
+  const importBatchId = result.checkpoint && unique.length ? uid("import") : "";
+  if (importBatchId) {
+    unique.forEach((tx) => {
+      tx.importBatchId = importBatchId;
+    });
+    result.checkpoint.importBatchId = importBatchId;
+  }
   const checkpointAdded = result.checkpoint && options.createCheckpoint !== false
     ? addBalanceCheckpoint(result.checkpoint.accountId, result.checkpoint)
     : false;
@@ -2507,7 +2544,8 @@ function transactionFromObject(row, options = {}) {
     date: normalizeDate(valueFromRow(row, STATEMENT_FIELD_ALIASES.date) || todayIso(), { dayFirst: options.preferDayFirst }),
     note: valueFromRow(row, STATEMENT_FIELD_ALIASES.note) || "",
     tags,
-    billId: null
+    billId: null,
+    importBatchId: valueFromRow(row, ["importBatchId", "import_batch_id"]) || ""
   };
 }
 
@@ -2530,7 +2568,8 @@ function statementCheckpointFromRows(rows, options = {}) {
       balance,
       position: "end",
       source: "bank_statement",
-      note: options.fileName ? `Imported from ${options.fileName}` : "Imported statement balance"
+      note: options.fileName ? `Imported from ${options.fileName}` : "Imported statement balance",
+      importBatchId: options.importBatchId || ""
     };
   }, null);
 }
@@ -2582,7 +2621,8 @@ function addBalanceCheckpoint(accountId, checkpoint) {
     balance,
     position: checkpoint.position === "start" ? "start" : "end",
     source: checkpoint.source === "bank_statement" || checkpoint.source === "account_created" ? checkpoint.source : "manual",
-    note: checkpoint.note || ""
+    note: checkpoint.note || "",
+    importBatchId: checkpoint.importBatchId || ""
   };
   const exists = (account.balanceCheckpoints || []).some((item) => (
     item.date === nextCheckpoint.date
@@ -2594,6 +2634,28 @@ function addBalanceCheckpoint(accountId, checkpoint) {
 
   account.balanceCheckpoints = normalizeBalanceCheckpoints([...(account.balanceCheckpoints || []), nextCheckpoint]);
   return true;
+}
+
+function removeBalanceCheckpoint(accountId, checkpointId) {
+  const account = findAccount(accountId);
+  if (!account?.balanceCheckpoints?.length || !checkpointId) return false;
+  const before = account.balanceCheckpoints.length;
+  account.balanceCheckpoints = account.balanceCheckpoints.filter((checkpoint) => checkpoint.id !== checkpointId);
+  return account.balanceCheckpoints.length !== before;
+}
+
+function removeBalanceCheckpoints(predicate) {
+  let removed = 0;
+  state.accounts.forEach((account) => {
+    const checkpoints = account.balanceCheckpoints || [];
+    const kept = checkpoints.filter((checkpoint) => {
+      if (!predicate(checkpoint, account)) return true;
+      removed += 1;
+      return false;
+    });
+    account.balanceCheckpoints = kept;
+  });
+  return removed;
 }
 
 function extractAmount(text) {
@@ -2685,10 +2747,18 @@ function cleanDescription(text, amount, account, category) {
 }
 
 function deleteTransaction(id) {
+  const removed = state.transactions.find((tx) => tx.id === id);
   state.transactions = state.transactions.filter((tx) => tx.id !== id);
+  const removedCheckpoints = cleanupImportCheckpointsAfterDelete(removed);
   saveState();
-  showToast("Entry deleted.");
+  showToast(removedCheckpoints ? "Entry and linked checkpoint deleted." : "Entry deleted.");
   render();
+}
+
+function cleanupImportCheckpointsAfterDelete(tx) {
+  if (!tx?.importBatchId) return 0;
+  if (state.transactions.some((item) => item.importBatchId === tx.importBatchId)) return 0;
+  return removeBalanceCheckpoints((checkpoint) => checkpoint.importBatchId === tx.importBatchId);
 }
 
 function toggleBillPaid(id) {
