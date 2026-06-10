@@ -44,6 +44,21 @@ const DEFAULT_TAGS = [
   { id: "tag_travel", name: "travel", color: "#d17431", keywords: ["flight", "hotel", "trip", "travel"] }
 ];
 
+const STATEMENT_FIELD_ALIASES = {
+  date: ["date", "transactionDate", "txnDate", "valueDate", "posted", "postingDate", "transaction date", "txn date"],
+  description: ["description", "name", "memo", "narration", "remarks", "particulars", "details", "transaction details"],
+  amount: ["amount", "value", "transactionAmount", "transaction amount"],
+  debit: ["debit", "withdrawal", "withdrawals", "debitAmount", "withdrawalAmount", "dr", "paidOut", "debit amt"],
+  credit: ["credit", "deposit", "deposits", "creditAmount", "depositAmount", "cr", "paidIn", "credit amt"],
+  balance: ["balance", "closingBalance", "runningBalance", "availableBalance", "ledgerBalance", "closing balance"],
+  type: ["type", "transactionType", "drCr", "debitCredit", "crdr", "transaction type"],
+  account: ["account", "accountId", "walletId", "fromAccount", "from_account", "from"],
+  toAccount: ["toAccount", "toAccountId", "to_account", "to"],
+  category: ["category"],
+  tags: ["tags", "tag"],
+  note: ["note", "notes"]
+};
+
 let state;
 let activeView = "dashboard";
 let editingTransactionId = null;
@@ -371,7 +386,7 @@ function normalizeState(value = {}) {
   const transactions = normalizeTransactions(value.transactions || starter.transactions, accounts);
 
   const next = {
-    version: 2,
+    version: 3,
     settings: { ...starter.settings, ...(value.settings || {}) },
     accountCategories,
     accounts,
@@ -431,19 +446,46 @@ function normalizeAccountCategories(categories) {
 
 function normalizeAccounts(accounts, accountCategories) {
   const defaultCategoryId = accountCategories[0]?.id || "acctcat_savings";
-  const normalized = (Array.isArray(accounts) ? accounts : []).map((account) => ({
-    id: account.id || uid("account"),
-    name: account.name || "Account",
-    categoryId: account.categoryId || inferAccountCategoryId(account.type || account.name, accountCategories) || defaultCategoryId,
-    openingBalance: Number(account.openingBalance || 0),
-    color: account.color || findAccountCategory(account.categoryId, accountCategories)?.color || "#0f766e"
-  }));
+  const normalized = (Array.isArray(accounts) ? accounts : []).map((account) => {
+    const openingBalance = Number(account.openingBalance || 0);
+    const openingBalanceDate = normalizeOptionalDate(account.openingBalanceDate || "");
+    return {
+      id: account.id || uid("account"),
+      name: account.name || "Account",
+      categoryId: account.categoryId || inferAccountCategoryId(account.type || account.name, accountCategories) || defaultCategoryId,
+      openingBalance,
+      openingBalanceDate,
+      balanceCheckpoints: normalizeBalanceCheckpoints(account.balanceCheckpoints || []),
+      color: account.color || findAccountCategory(account.categoryId, accountCategories)?.color || "#0f766e"
+    };
+  });
 
   if (normalized.length) return normalized;
 
   return [
-    { id: uid("account"), name: "Savings", categoryId: defaultCategoryId, openingBalance: 0, color: "#0f766e" }
+    { id: uid("account"), name: "Savings", categoryId: defaultCategoryId, openingBalance: 0, openingBalanceDate: "", balanceCheckpoints: [], color: "#0f766e" }
   ];
+}
+
+function normalizeBalanceCheckpoints(checkpoints) {
+  const byKey = new Map();
+  (Array.isArray(checkpoints) ? checkpoints : []).forEach((checkpoint) => {
+    const date = normalizeOptionalDate(checkpoint.date);
+    const balance = Number(checkpoint.balance);
+    if (!date || !Number.isFinite(balance)) return;
+    const position = checkpoint.position === "start" ? "start" : "end";
+    const source = checkpoint.source === "bank_statement" || checkpoint.source === "account_created" ? checkpoint.source : "manual";
+    const key = `${date}|${position}|${source}|${balance}`;
+    byKey.set(key, {
+      id: checkpoint.id || uid("checkpoint"),
+      date,
+      balance,
+      position,
+      source,
+      note: checkpoint.note || ""
+    });
+  });
+  return Array.from(byKey.values()).sort(compareCheckpointsAsc);
 }
 
 function normalizeTransactions(transactions, accounts) {
@@ -512,7 +554,7 @@ function createStarterState() {
   const mfId = "acct_mf_portfolio";
 
   return {
-    version: 2,
+    version: 3,
     settings: {
       currency: "USD",
       selectedMonth: month,
@@ -520,10 +562,10 @@ function createStarterState() {
     },
     accountCategories: DEFAULT_ACCOUNT_CATEGORIES.map((category) => ({ ...category })),
     accounts: [
-      { id: savingsId, name: "Main Savings", categoryId: "acctcat_savings", openingBalance: 2400, color: "#0f766e" },
-      { id: creditId, name: "Visa Card", categoryId: "acctcat_credit", openingBalance: 0, color: "#b63a2d" },
-      { id: cashId, name: "Cash", categoryId: "acctcat_cash", openingBalance: 120, color: "#5c7d2b" },
-      { id: mfId, name: "Index Fund", categoryId: "acctcat_mutual_funds", openingBalance: 1650, color: "#0e8a9a" }
+      { id: savingsId, name: "Main Savings", categoryId: "acctcat_savings", openingBalance: 2400, openingBalanceDate: "", balanceCheckpoints: [], color: "#0f766e" },
+      { id: creditId, name: "Visa Card", categoryId: "acctcat_credit", openingBalance: 0, openingBalanceDate: "", balanceCheckpoints: [], color: "#b63a2d" },
+      { id: cashId, name: "Cash", categoryId: "acctcat_cash", openingBalance: 120, openingBalanceDate: "", balanceCheckpoints: [], color: "#5c7d2b" },
+      { id: mfId, name: "Index Fund", categoryId: "acctcat_mutual_funds", openingBalance: 1650, openingBalanceDate: "", balanceCheckpoints: [], color: "#0e8a9a" }
     ],
     transactions: [
       { id: uid("tx"), type: "income", amount: 4200, description: "Salary", category: "Salary", accountId: savingsId, toAccountId: "", date: firstDay, note: "", tags: [], billId: null },
@@ -560,7 +602,7 @@ function createBlankState() {
       selectedMonth: getCurrentMonth(),
       lastView: "dashboard"
     },
-    accounts: starter.accounts.map((account) => ({ ...account, openingBalance: 0 })),
+    accounts: starter.accounts.map((account) => ({ ...account, openingBalance: 0, openingBalanceDate: "", balanceCheckpoints: [] })),
     transactions: [],
     budgets: [],
     goals: [],
@@ -781,12 +823,26 @@ function renderTransactions() {
       <article class="card">
         <div class="card-header">
           <h2 class="card-title">Bulk upload</h2>
-          <span class="chip">Text, CSV, JSON</span>
+          <span class="chip">Text, bank CSV, JSON</span>
         </div>
         <div class="form-grid">
+          <label class="field span-4">
+            <span class="field-label">Default account</span>
+            <select id="bulkAccount" class="control">
+              ${accountOptions()}
+            </select>
+          </label>
+          <label class="field span-4">
+            <span class="field-label">Statement balance</span>
+            <select id="bulkBalanceMode" class="control">
+              <option value="checkpoint">Use latest balance as checkpoint</option>
+              <option value="transactions">Only import transactions</option>
+            </select>
+          </label>
+          ${renderBulkImportExamples()}
           <label class="field span-12">
             <span class="field-label">Paste entries</span>
-            <textarea id="bulkText" class="control" placeholder="coffee 4.50 cash yesterday&#10;date,description,amount,type,account,toAccount,category,tags&#10;2026-06-01,Salary,4200,income,Main Savings,,Salary,"></textarea>
+            <textarea id="bulkText" class="control" placeholder="Paste quick text, CSV, bank CSV, or JSON here"></textarea>
           </label>
           <div class="span-12 quick-actions">
             <button id="bulkTextBtn" class="button" type="button">Import pasted entries</button>
@@ -818,6 +874,56 @@ function renderTransactions() {
         </div>
       </article>
     </div>
+  `;
+}
+
+function renderBulkImportExamples() {
+  return `
+    <details class="format-help span-12" open>
+      <summary>
+        <span>Supported formats</span>
+        <span class="format-pills">
+          <span class="chip">Text</span>
+          <span class="chip">CSV</span>
+          <span class="chip">Bank CSV</span>
+          <span class="chip">JSON</span>
+        </span>
+      </summary>
+      <div class="format-grid">
+        <section class="format-example">
+          <h3>Quick text</h3>
+          <pre><code>coffee 120 cash yesterday
+salary 85000 HDFC Savings 2026-06-01
+transfer 5000 HDFC Savings to Cash 2026-06-03</code></pre>
+        </section>
+        <section class="format-example">
+          <h3>Standard CSV</h3>
+          <pre><code>date,description,amount,type,account,category,tags
+2026-06-01,Salary,85000,income,HDFC Savings,Salary,
+2026-06-02,Coffee,-120,expense,HDFC Savings,Food,food</code></pre>
+        </section>
+        <section class="format-example">
+          <h3>Bank CSV</h3>
+          <pre><code>Txn Date,Narration,Debit,Credit,Balance
+09/06/2026,UPI COFFEE SHOP,120,,49880
+10/06/2026,SALARY CREDIT,,85000,134880</code></pre>
+        </section>
+        <section class="format-example">
+          <h3>JSON</h3>
+          <pre><code>{
+  "transactions": [
+    {
+      "date": "2026-06-01",
+      "description": "Salary",
+      "amount": 85000,
+      "type": "income",
+      "account": "HDFC Savings"
+    }
+  ]
+}</code></pre>
+        </section>
+      </div>
+    </details>
   `;
 }
 
@@ -903,6 +1009,10 @@ function renderAccounts() {
             <input id="accountOpening" class="control" type="number" step="0.01" value="0" required>
           </label>
           <label class="field span-6">
+            <span class="field-label">Balance from date</span>
+            <input id="accountOpeningDate" class="control" type="date" value="${todayIso()}" required>
+          </label>
+          <label class="field span-6">
             <span class="field-label">Color</span>
             <input id="accountColor" class="control" type="color" value="#0f766e">
           </label>
@@ -938,6 +1048,41 @@ function renderAccounts() {
         </form>
       </article>
     </div>
+
+    <article class="card section-gap">
+      <div class="card-header">
+        <h2 class="card-title">Balance checkpoint</h2>
+        <span class="chip">Trusted balance</span>
+      </div>
+      <form id="checkpointForm" class="form-grid">
+        <label class="field span-3">
+          <span class="field-label">Account</span>
+          <select id="checkpointAccount" class="control">${accountOptions(selectedActivityAccountId)}</select>
+        </label>
+        <label class="field span-3">
+          <span class="field-label">Balance</span>
+          <input id="checkpointBalance" class="control" type="number" step="0.01" required>
+        </label>
+        <label class="field span-3">
+          <span class="field-label">Date</span>
+          <input id="checkpointDate" class="control" type="date" value="${todayIso()}" required>
+        </label>
+        <label class="field span-3">
+          <span class="field-label">Applies</span>
+          <select id="checkpointPosition" class="control">
+            <option value="end">After this date</option>
+            <option value="start">From start of this date</option>
+          </select>
+        </label>
+        <label class="field span-12">
+          <span class="field-label">Note</span>
+          <input id="checkpointNote" class="control" type="text" placeholder="Statement closing balance, manual reconciliation">
+        </label>
+        <div class="span-12 row-actions">
+          <button class="button" type="submit">Save checkpoint</button>
+        </div>
+      </form>
+    </article>
 
     <div class="split section-gap">
       <article class="card">
@@ -1364,6 +1509,10 @@ function bindTransactionEvents() {
   const bulkText = document.querySelector("#bulkText");
   const bulkTextBtn = document.querySelector("#bulkTextBtn");
   const bulkFile = document.querySelector("#bulkFile");
+  const bulkImportOptions = () => ({
+    defaultAccountId: document.querySelector("#bulkAccount").value,
+    createCheckpoint: document.querySelector("#bulkBalanceMode").value === "checkpoint"
+  });
 
   const updateTypeFields = () => {
     const isTransfer = type.value === "transfer";
@@ -1422,7 +1571,7 @@ function bindTransactionEvents() {
   filterAccount.addEventListener("change", filter);
 
   bulkTextBtn.addEventListener("click", () => {
-    importTransactionText(bulkText.value);
+    importTransactionText(bulkText.value, "", bulkImportOptions());
   });
 
   bulkFile.addEventListener("change", (event) => {
@@ -1430,7 +1579,7 @@ function bindTransactionEvents() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      importTransactionText(String(reader.result || ""), file.name);
+      importTransactionText(String(reader.result || ""), file.name, bulkImportOptions());
       event.target.value = "";
     };
     reader.readAsText(file);
@@ -1499,15 +1648,48 @@ function bindAccountEvents() {
   document.querySelector("#accountForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const category = findAccountCategory(document.querySelector("#accountCategory").value);
+    const openingBalance = Number(document.querySelector("#accountOpening").value || 0);
+    const openingBalanceDate = document.querySelector("#accountOpeningDate").value || todayIso();
     state.accounts.push({
       id: uid("account"),
       name: document.querySelector("#accountName").value.trim(),
       categoryId: category?.id || state.accountCategories[0]?.id || "",
-      openingBalance: Number(document.querySelector("#accountOpening").value || 0),
+      openingBalance,
+      openingBalanceDate,
+      balanceCheckpoints: [{
+        id: uid("checkpoint"),
+        date: openingBalanceDate,
+        balance: openingBalance,
+        position: "start",
+        source: "account_created",
+        note: "Account starting balance"
+      }],
       color: document.querySelector("#accountColor").value || category?.color || "#0f766e"
     });
     saveState();
     showToast("Account added.");
+    render();
+  });
+
+  document.querySelector("#checkpointForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const accountId = document.querySelector("#checkpointAccount").value;
+    const balance = Number(document.querySelector("#checkpointBalance").value);
+    const date = document.querySelector("#checkpointDate").value || todayIso();
+    if (!accountId || !Number.isFinite(balance)) {
+      showToast("Choose an account and balance.");
+      return;
+    }
+    const added = addBalanceCheckpoint(accountId, {
+      id: uid("checkpoint"),
+      date,
+      balance,
+      position: document.querySelector("#checkpointPosition").value === "start" ? "start" : "end",
+      source: "manual",
+      note: document.querySelector("#checkpointNote").value.trim()
+    });
+    showToast(added ? "Balance checkpoint saved." : "That checkpoint already exists.");
+    saveState();
     render();
   });
 
@@ -1942,6 +2124,7 @@ function renderAccountGroup(category) {
 
 function renderAccountRow(account) {
   const category = findAccountCategory(account.categoryId);
+  const checkpoint = latestBalanceCheckpoint(account.id);
   return `
     <div class="account-row">
       <div>
@@ -1951,7 +2134,7 @@ function renderAccountRow(account) {
         </p>
         <div class="row-meta">
           <span>${escapeHtml(category?.name || "Account")}</span>
-          <span>Opening ${formatMoney(account.openingBalance)}</span>
+          ${checkpoint ? `<span>${checkpointLabel(checkpoint)}</span>` : `<span>Opening ${formatMoney(account.openingBalance)}</span>`}
         </div>
       </div>
       <div class="row-actions">
@@ -2118,8 +2301,8 @@ function categoryOptions(type, selected) {
   `).join("");
 }
 
-function parseQuickEntries(input) {
-  return splitQuickText(input).map(parseQuickEntry).filter(Boolean);
+function parseQuickEntries(input, options = {}) {
+  return splitQuickText(input).map((part) => parseQuickEntry(part, options)).filter(Boolean);
 }
 
 function splitQuickText(input) {
@@ -2133,14 +2316,14 @@ function splitQuickText(input) {
     .filter(Boolean);
 }
 
-function parseQuickEntry(part) {
+function parseQuickEntry(part, options = {}) {
   const amount = extractAmount(part);
   if (!amount || amount <= 0) return null;
 
   const type = detectType(part);
   const transferAccounts = type === "transfer" ? detectTransferAccounts(part) : null;
   const category = type === "transfer" ? "Transfer" : detectCategory(part, type);
-  const account = transferAccounts?.from || detectAccount(part) || state.accounts[0];
+  const account = transferAccounts?.from || detectAccount(part) || findAccount(options.defaultAccountId) || state.accounts[0];
   const toAccount = transferAccounts?.to || null;
   const date = detectDate(part);
   const description = cleanDescription(part, amount, account, category) || category;
@@ -2164,38 +2347,71 @@ function parseQuickEntry(part) {
   };
 }
 
-function importTransactionText(text, fileName = "") {
-  const entries = parseTransactionUpload(text, fileName);
-  if (!entries.length) {
+function importTransactionText(text, fileName = "", options = {}) {
+  const result = parseTransactionUpload(text, fileName, options);
+  const { unique, skipped } = uniqueTransactions(result.transactions);
+  const checkpointAdded = result.checkpoint && options.createCheckpoint !== false
+    ? addBalanceCheckpoint(result.checkpoint.accountId, result.checkpoint)
+    : false;
+
+  if (!unique.length && !checkpointAdded) {
     showToast("No valid entries found.");
     return;
   }
-  addTransactions(entries);
+
+  if (unique.length) addTransactions(unique);
   saveState();
-  showToast(`${entries.length} entr${entries.length === 1 ? "y" : "ies"} imported.`);
+  const parts = [];
+  if (unique.length) parts.push(`${unique.length} entr${unique.length === 1 ? "y" : "ies"} imported`);
+  if (skipped) parts.push(`${skipped} duplicate${skipped === 1 ? "" : "s"} skipped`);
+  if (checkpointAdded) parts.push("balance checkpoint saved");
+  showToast(`${parts.join(", ")}.`);
   render();
 }
 
-function parseTransactionUpload(text, fileName = "") {
+function parseTransactionUpload(text, fileName = "", options = {}) {
   const trimmed = text.trim();
-  if (!trimmed) return [];
+  if (!trimmed) return { transactions: [], checkpoint: null };
 
   if (fileName.toLowerCase().endsWith(".json") || trimmed.startsWith("[") || trimmed.startsWith("{")) {
     try {
       const parsed = JSON.parse(trimmed);
       const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed.transactions) ? parsed.transactions : [];
-      return rows.map(transactionFromObject).filter(Boolean);
+      return importResultFromRows(rows, { ...options, preferDayFirst: false });
     } catch (error) {
-      return [];
+      return { transactions: [], checkpoint: null };
     }
   }
 
   const firstLine = trimmed.split(/\r?\n/)[0] || "";
-  if (firstLine.includes(",") && /amount/i.test(firstLine) && /description/i.test(firstLine)) {
-    return parseCsvRows(trimmed).map(transactionFromObject).filter(Boolean);
+  if (firstLine.includes(",") && looksLikeCsvHeader(firstLine)) {
+    return importResultFromRows(parseCsvRows(trimmed), { ...options, preferDayFirst: true, fileName });
   }
 
-  return parseQuickEntries(trimmed);
+  return { transactions: parseQuickEntries(trimmed, options), checkpoint: null };
+}
+
+function importResultFromRows(rows, options = {}) {
+  const transactions = rows.map((row) => transactionFromObject(row, options)).filter(Boolean);
+  return {
+    transactions,
+    checkpoint: statementCheckpointFromRows(rows, options)
+  };
+}
+
+function looksLikeCsvHeader(line) {
+  const headers = parseCsvLine(line).map((header) => comparableFieldName(header));
+  const amountHeaders = new Set([
+    ...STATEMENT_FIELD_ALIASES.amount,
+    ...STATEMENT_FIELD_ALIASES.debit,
+    ...STATEMENT_FIELD_ALIASES.credit
+  ].map(comparableFieldName));
+  const detailHeaders = new Set([
+    ...STATEMENT_FIELD_ALIASES.date,
+    ...STATEMENT_FIELD_ALIASES.description
+  ].map(comparableFieldName));
+  return headers.some((header) => amountHeaders.has(header))
+    && headers.some((header) => detailHeaders.has(header));
 }
 
 function parseCsvRows(text) {
@@ -2233,41 +2449,151 @@ function parseCsvLine(line) {
   return cells;
 }
 
-function transactionFromObject(row) {
-  const rawAmount = Number(String(row.amount || row.value || "0").replace(/,/g, ""));
-  const amount = Math.abs(rawAmount);
+function valueFromRow(row, aliases) {
+  if (!row) return "";
+  const wanted = new Set(aliases.map(comparableFieldName));
+  const key = Object.keys(row).find((item) => wanted.has(comparableFieldName(item)));
+  return key ? row[key] : "";
+}
+
+function numberFromRow(row, aliases) {
+  const value = valueFromRow(row, aliases);
+  return parseMoneyValue(value);
+}
+
+function parseMoneyValue(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "-") return null;
+  const negative = /^\s*-/.test(raw) || /\(.+\)/.test(raw) || /\bdr\b/i.test(raw);
+  const cleaned = raw.replace(/,/g, "").replace(/[^\d.-]/g, "").replace(/(?!^)-/g, "");
+  if (!cleaned || cleaned === "-" || cleaned === ".") return null;
+  const parsed = Number(cleaned);
+  if (!Number.isFinite(parsed)) return null;
+  return negative && parsed > 0 ? -parsed : parsed;
+}
+
+function transactionFromObject(row, options = {}) {
+  const explicitType = String(valueFromRow(row, STATEMENT_FIELD_ALIASES.type) || "").toLowerCase();
+  const debit = Math.abs(numberFromRow(row, STATEMENT_FIELD_ALIASES.debit) || 0);
+  const credit = Math.abs(numberFromRow(row, STATEMENT_FIELD_ALIASES.credit) || 0);
+  const rawAmount = numberFromRow(row, STATEMENT_FIELD_ALIASES.amount);
+  const amount = debit || credit || Math.abs(rawAmount || 0);
   if (!amount) return null;
 
-  const description = String(row.description || row.name || row.memo || "Transaction").trim();
-  const explicitType = String(row.type || "").toLowerCase();
-  const toAccount = findAccountByName(row.toAccount || row.to_account || row.to || "");
-  const type = explicitType === "transfer" || toAccount ? "transfer" : explicitType === "income" || rawAmount > 0 ? "income" : "expense";
-  const account = findAccountByName(row.account || row.fromAccount || row.from_account || row.from || "") || detectAccount(description) || state.accounts[0];
-  const category = type === "transfer" ? "Transfer" : row.category || detectCategory(description, type);
-  const tags = normalizeTagInput(row.tags || row.tag || "").length ? normalizeTagInput(row.tags || row.tag || "") : detectTags(`${description} ${category}`);
+  const description = String(valueFromRow(row, STATEMENT_FIELD_ALIASES.description) || "Transaction").trim();
+  const toAccount = findAccountByNameOrId(valueFromRow(row, STATEMENT_FIELD_ALIASES.toAccount) || "");
+  const isCredit = credit > 0 || /\b(income|credit|cr|deposit|received|receipt)\b/.test(explicitType);
+  const isDebit = debit > 0 || /\b(expense|debit|dr|withdrawal|paid|payment)\b/.test(explicitType);
+  const type = explicitType === "transfer" || toAccount ? "transfer" : isCredit || (!isDebit && Number(rawAmount) > 0) ? "income" : "expense";
+  const account = findAccountByNameOrId(valueFromRow(row, STATEMENT_FIELD_ALIASES.account) || "")
+    || findAccount(options.defaultAccountId)
+    || detectAccount(description)
+    || state.accounts[0];
+  const category = type === "transfer" ? "Transfer" : valueFromRow(row, STATEMENT_FIELD_ALIASES.category) || detectCategory(description, type);
+  const explicitTags = normalizeTagInput(valueFromRow(row, STATEMENT_FIELD_ALIASES.tags) || "");
+  const tags = explicitTags.length ? explicitTags : detectTags(`${description} ${category}`);
   ensureTags(tags);
 
   if (type === "transfer" && (!account || !toAccount || account.id === toAccount.id)) return null;
 
   return {
-    id: row.id || uid("tx"),
+    id: valueFromRow(row, ["id"]) || uid("tx"),
     type,
     amount,
     description,
     category,
     accountId: account?.id || state.accounts[0]?.id || "",
     toAccountId: type === "transfer" ? toAccount?.id || "" : "",
-    date: normalizeDate(row.date || row.transactionDate || row.posted || todayIso()),
-    note: row.note || "",
+    date: normalizeDate(valueFromRow(row, STATEMENT_FIELD_ALIASES.date) || todayIso(), { dayFirst: options.preferDayFirst }),
+    note: valueFromRow(row, STATEMENT_FIELD_ALIASES.note) || "",
     tags,
     billId: null
   };
+}
+
+function statementCheckpointFromRows(rows, options = {}) {
+  if (options.createCheckpoint === false) return null;
+  const account = findAccount(options.defaultAccountId) || state.accounts[0];
+  if (!account) return null;
+
+  return rows.reduce((latest, row) => {
+    const balance = numberFromRow(row, STATEMENT_FIELD_ALIASES.balance);
+    const dateValue = valueFromRow(row, STATEMENT_FIELD_ALIASES.date);
+    if (!Number.isFinite(balance) || !dateValue) return latest;
+    const date = normalizeDate(dateValue, { dayFirst: options.preferDayFirst });
+    if (!date) return latest;
+    if (latest && date < latest.date) return latest;
+    return {
+      id: uid("checkpoint"),
+      accountId: account.id,
+      date,
+      balance,
+      position: "end",
+      source: "bank_statement",
+      note: options.fileName ? `Imported from ${options.fileName}` : "Imported statement balance"
+    };
+  }, null);
 }
 
 function addTransactions(transactions) {
   transactions.forEach((tx) => ensureTags(tx.tags || []));
   state.transactions.push(...transactions);
   saveState();
+}
+
+function uniqueTransactions(transactions) {
+  const seen = new Set(state.transactions.map(transactionFingerprint));
+  const unique = [];
+  let skipped = 0;
+
+  transactions.forEach((tx) => {
+    const fingerprint = transactionFingerprint(tx);
+    if (seen.has(fingerprint)) {
+      skipped += 1;
+      return;
+    }
+    seen.add(fingerprint);
+    unique.push(tx);
+  });
+
+  return { unique, skipped };
+}
+
+function transactionFingerprint(tx) {
+  return [
+    tx.date,
+    tx.type,
+    Number(tx.amount || 0).toFixed(2),
+    tx.accountId || "",
+    tx.toAccountId || "",
+    String(tx.description || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+  ].join("|");
+}
+
+function addBalanceCheckpoint(accountId, checkpoint) {
+  const account = findAccount(accountId);
+  const date = normalizeOptionalDate(checkpoint?.date);
+  const balance = Number(checkpoint?.balance);
+  if (!account || !date || !Number.isFinite(balance)) return false;
+
+  const nextCheckpoint = {
+    id: checkpoint.id || uid("checkpoint"),
+    date,
+    balance,
+    position: checkpoint.position === "start" ? "start" : "end",
+    source: checkpoint.source === "bank_statement" || checkpoint.source === "account_created" ? checkpoint.source : "manual",
+    note: checkpoint.note || ""
+  };
+  const exists = (account.balanceCheckpoints || []).some((item) => (
+    item.date === nextCheckpoint.date
+    && item.position === nextCheckpoint.position
+    && item.source === nextCheckpoint.source
+    && Number(item.balance) === nextCheckpoint.balance
+  ));
+  if (exists) return false;
+
+  account.balanceCheckpoints = normalizeBalanceCheckpoints([...(account.balanceCheckpoints || []), nextCheckpoint]);
+  return true;
 }
 
 function extractAmount(text) {
@@ -2428,8 +2754,10 @@ function totalAccountsByKind(kind) {
 
 function accountBalance(accountId) {
   const account = findAccount(accountId);
-  const opening = Number(account?.openingBalance || 0);
+  const checkpoint = latestBalanceCheckpoint(accountId);
+  const opening = checkpoint ? Number(checkpoint.balance || 0) : Number(account?.openingBalance || 0);
   return state.transactions.reduce((sum, tx) => {
+    if (checkpoint && !transactionAppliesAfterCheckpoint(tx, checkpoint)) return sum;
     if (tx.type === "transfer") {
       if (tx.accountId === accountId) return sum - tx.amount;
       if (tx.toAccountId === accountId) return sum + tx.amount;
@@ -2438,6 +2766,16 @@ function accountBalance(accountId) {
     if (tx.accountId !== accountId) return sum;
     return sum + (tx.type === "income" ? tx.amount : -tx.amount);
   }, opening);
+}
+
+function latestBalanceCheckpoint(accountId) {
+  const account = findAccount(accountId);
+  if (!account?.balanceCheckpoints?.length) return null;
+  return [...account.balanceCheckpoints].sort(compareCheckpointsDesc)[0] || null;
+}
+
+function transactionAppliesAfterCheckpoint(tx, checkpoint) {
+  return checkpoint.position === "start" ? tx.date >= checkpoint.date : tx.date > checkpoint.date;
 }
 
 function categoryTotals(month) {
@@ -2580,6 +2918,12 @@ function findAccountByName(name) {
     || state.accounts.find((account) => account.name.toLowerCase().includes(value) || value.includes(account.name.toLowerCase()));
 }
 
+function findAccountByNameOrId(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  return findAccount(text) || findAccountByName(text);
+}
+
 function findAccountCategory(categoryId, categories = state.accountCategories) {
   return categories.find((category) => category.id === categoryId);
 }
@@ -2681,10 +3025,62 @@ function normalizeFieldName(value) {
   return String(value || "").trim().replace(/\s+/g, "").replace(/[-_](.)/g, (_, char) => char.toUpperCase());
 }
 
-function normalizeDate(value) {
+function comparableFieldName(value) {
+  return normalizeFieldName(value).toLowerCase();
+}
+
+function normalizeDate(value, options = {}) {
   const text = String(value || "").trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+
+  const numericMatch = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+  if (numericMatch) {
+    const first = Number(numericMatch[1]);
+    const second = Number(numericMatch[2]);
+    const year = normalizeYear(Number(numericMatch[3]));
+    const dayFirst = options.dayFirst || first > 12;
+    const day = dayFirst ? first : second;
+    const month = dayFirst ? second : first;
+    if (isValidDateParts(year, month, day)) return `${year}-${pad(month)}-${pad(day)}`;
+  }
+
+  const parsed = Date.parse(text.replace(/\b(\d{1,2})(st|nd|rd|th)\b/gi, "$1"));
+  if (Number.isFinite(parsed)) {
+    const date = new Date(parsed);
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+
   return detectDate(text);
+}
+
+function normalizeOptionalDate(value) {
+  const text = String(value || "").trim();
+  return text ? normalizeDate(text, { dayFirst: true }) : "";
+}
+
+function isValidDateParts(year, month, day) {
+  if (year < 1900 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
+function compareCheckpointsAsc(a, b) {
+  const dateSort = a.date.localeCompare(b.date);
+  if (dateSort !== 0) return dateSort;
+  return checkpointPositionRank(a) - checkpointPositionRank(b);
+}
+
+function compareCheckpointsDesc(a, b) {
+  return compareCheckpointsAsc(b, a);
+}
+
+function checkpointPositionRank(checkpoint) {
+  return checkpoint.position === "end" ? 2 : 1;
+}
+
+function checkpointLabel(checkpoint) {
+  const prefix = checkpoint.position === "start" ? "Trusted from" : "Trusted after";
+  return `${prefix} ${formatDate(checkpoint.date)}: ${formatMoney(checkpoint.balance)}`;
 }
 
 function showToast(message) {

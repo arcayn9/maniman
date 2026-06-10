@@ -551,6 +551,77 @@ textarea.control {
   flex-wrap: wrap;
 }
 
+.format-help {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  overflow: hidden;
+}
+
+.format-help summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+  padding: 12px;
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 800;
+  list-style: none;
+}
+
+.format-help summary::-webkit-details-marker {
+  display: none;
+}
+
+.format-pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: end;
+}
+
+.format-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  border-top: 1px solid var(--line);
+  background: var(--line);
+}
+
+.format-example {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.format-example h3 {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.2;
+}
+
+.format-example pre {
+  margin: 0;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: #111715;
+  color: #f7faf9;
+  padding: 10px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.format-example code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+}
+
 .preview-list,
 .transaction-list,
 .bill-list,
@@ -1054,8 +1125,18 @@ textarea.control {
   }
 
   .metric-grid,
-  .chart-wrap {
+  .chart-wrap,
+  .format-grid {
     grid-template-columns: 1fr;
+  }
+
+  .format-help summary {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .format-pills {
+    justify-content: start;
   }
 
   .donut {

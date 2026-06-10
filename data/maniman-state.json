@@ -1,9 +1,9 @@
 {
-  "version": 2,
+  "version": 3,
   "settings": {
     "currency": "INR",
     "selectedMonth": "2026-06",
-    "lastView": "settings"
+    "lastView": "transactions"
   },
   "accountCategories": [
     {
@@ -61,6 +61,8 @@
       "name": "Main Savings",
       "categoryId": "acctcat_savings",
       "openingBalance": 0,
+      "openingBalanceDate": "",
+      "balanceCheckpoints": [],
       "color": "#0f766e"
     },
     {
@@ -68,6 +70,8 @@
       "name": "Visa Card",
       "categoryId": "acctcat_credit",
       "openingBalance": 0,
+      "openingBalanceDate": "",
+      "balanceCheckpoints": [],
       "color": "#b63a2d"
     },
     {
@@ -75,6 +79,8 @@
       "name": "Cash",
       "categoryId": "acctcat_cash",
       "openingBalance": 0,
+      "openingBalanceDate": "",
+      "balanceCheckpoints": [],
       "color": "#5c7d2b"
     },
     {
@@ -82,6 +88,8 @@
       "name": "Index Fund",
       "categoryId": "acctcat_mutual_funds",
       "openingBalance": 0,
+      "openingBalanceDate": "",
+      "balanceCheckpoints": [],
       "color": "#0e8a9a"
     }
   ],
