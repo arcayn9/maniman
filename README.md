@@ -140,16 +140,10 @@ latest checkpoint balance + transactions after that checkpoint
 
 This prevents older imported transactions from accidentally changing today's real balance. New accounts create a starting checkpoint from the opening balance and date. You can also add a manual checkpoint from `Accounts -> Balance checkpoint`.
 
-## Interim Cloud Mode
+## Cloudflare hosting
 
-Maniman can also run as an installable PWA with optional Supabase cloud sync for the period before a spare local server is available.
+For the Workers build shown in the current deployment logs, use the [Cloudflare deployment guide](docs/CLOUDFLARE_DEPLOYMENT.md). `npm run build` packages only public assets into `dist` and generates browser config from `SUPABASE_URL` plus `SUPABASE_PUBLISHABLE_KEY` (or the existing `SUPABASE_ANON_KEY`). Wrangler runs that build before deploy/version upload.
 
-1. Create a Supabase project.
-2. Run the SQL from `docs/INTERIM_MOBILE_FIRST_CLOUD_PLAN.md`.
-3. Add the public Supabase URL and anon key to `config.js`.
-4. Host the folder with Cloudflare Pages or any static host.
-5. Open Settings, create/sign into an account, and sync.
+Set the Cloudflare build command to `npm run build`, the production deploy command to `npm run deploy`, and the non-production version upload command to `npm run preview:upload`. Validate without uploading with `npm run deploy:check`. Deploy `dist`, never the full repository directory.
 
-The Supabase anon key is safe to use in the browser only when Row Level Security is enabled. Do not put service-role keys in `config.js`.
-
-Cloud financial state is now an encrypted vault envelope rather than plaintext transaction JSON. The cloud SDK is pinned and served locally. No live database deployment or RLS verification has been performed by this implementation increment. The older cloud setup document describes the pre-encryption format; use the [vault guide](docs/SECURE_VAULT.md) for the new behavior.
+Cloud state is an encrypted vault envelope. The [vault guide](docs/SECURE_VAULT.md) describes recovery and owner boundaries. Hosted RLS/auth and two-device enrollment/conflict recovery still need live validation; this deployment fix does not change the database or merge private vaults. The older [interim cloud plan](docs/INTERIM_MOBILE_FIRST_CLOUD_PLAN.md) is historical and describes the superseded plaintext storage model.

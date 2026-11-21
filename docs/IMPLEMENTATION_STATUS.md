@@ -23,7 +23,7 @@ Statement commit/undo and subsequent ordinary app saves use encrypted persistenc
 | Native browser visual/interaction check | Initial check was blocked by permissions; desktop and 375px synthetic rendering were inspected on 2026-11-21. Physical-device, vault visual and live-data release checks remain pending. |
 | Live Supabase RLS/auth and phone/laptop interoperability | **Pending:** implementation uses mocked sync/owner tests; no live financial data or account changes were used |
 
-The isolated `.venv-converter` is installed for local PDF tests. `requirements-converter.lock` records its versions; `package-lock.json` records the dependency-free Node test/server manifest. The Supabase browser SDK is pinned and bundled locally with its license and checksum.
+The isolated `.venv-converter` is installed for local PDF tests. `requirements-converter.lock` records its versions; The app and Node test/server code have no runtime package dependencies; `package-lock.json` also pins the Wrangler development tooling for cloud builds. The Supabase browser SDK is pinned and bundled locally with its license and checksum.
 
 ## Finance Workspace UI — 2026-11-21
 
@@ -76,3 +76,9 @@ Currency/action refinement: new vault and starter defaults are INR with ₹/Indi
 Added 29 searchable, category-filtered walkthroughs under User’s Guide in desktop navigation and the mobile App menu. Instructions cover every implemented app view, local conversion, statement review/linking/undo, manual/direct imports, account checkpoints, reports, budget/goal/bill behavior, tags, vault recovery/backups, reset actions and optional cloud limitations. The same catalog generates `docs/USER_GUIDE.md`; tests enforce matching content. The guide is part of the allowlisted public/offline app shell, with no financial data or remote search calls.
 
 Validation: 78 Node tests and 20 Python converter tests passed. Guide search, empty states, contextual navigation, restored route acceptance and public asset serving have dedicated coverage. Feature branch: `codex/finance-workspace-user-guide`. No merge or cloud deployment is part of this push; the requested deployment follows a confirmed merge to main and validation of the existing hosted configuration.
+
+## Cloudflare build fix — 2026-11-21
+
+The Cloudflare pipeline ran `wrangler versions upload` without an entry point or assets configuration. Added an assets-only `wrangler.jsonc`, a public-allowlist static build into ignored `dist`, safe environment-based browser config generation, and pinned Wrangler 4.166.0. The Wrangler build hook supports the logged existing command; documented build/production/version-preview commands are in `CLOUDFLARE_DEPLOYMENT.md`.
+
+Validation: 84 Node tests passed, including packaging exclusions, generated configuration, privileged-key rejection, output cleanup and symlink guards. Wrangler version-upload dry-run passed. Local Cloudflare runtime served all 12 public app files with correct config/cache headers, rejected 11 non-public paths with 404 and did not provide a writable state API. No production activation, database migration or private-vault changes were performed.

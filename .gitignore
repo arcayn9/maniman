@@ -8,3 +8,8 @@ private-statements/
 tmp/
 data/*.vault.json
 data/*.vault.json.tmp
+
+node_modules/
+dist/
+.wrangler/
+.maniman-build-*/

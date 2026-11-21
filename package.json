@@ -7,9 +7,16 @@
     "start": "node server.js",
     "test": "node --test tests/*.test.js",
     "test:converter": "python3 -m unittest discover -s tests -p 'test_*.py' -v",
-    "docs:guide": "node tools/export-user-guide.cjs"
+    "docs:guide": "node tools/export-user-guide.cjs",
+    "build": "node tools/build-static.cjs",
+    "deploy": "wrangler deploy",
+    "preview:upload": "wrangler versions upload",
+    "deploy:check": "wrangler versions upload --dry-run"
   },
   "engines": {
     "node": ">=22"
+  },
+  "devDependencies": {
+    "wrangler": "4.166.0"
   }
 }
