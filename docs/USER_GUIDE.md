@@ -108,7 +108,7 @@ mkdir -p private-statements
 .venv-converter/bin/python -m tools.statement_converter private-statements/statement.pdf -o private-statements/statement.json
 ```
 
-Current support is a generic explicit-column layout, not every bank's PDF. PDFs with several accounts may need splitting locally. No remote OCR or model fallback is used. Converter JSON is ordinary sensitive plaintext until imported; manage its storage and retention separately from the encrypted vault.
+Current converter support includes generic explicit columns and ruled Value Date/Post Date grids with wrapped cells. Post Date supplies the ledger date while both source dates are retained. This does not cover every bank PDF or borderless/scanned variation. PDFs with several accounts may need splitting locally. No remote OCR or model fallback is used. Converter JSON is ordinary sensitive plaintext until imported; manage its storage and retention separately from the encrypted vault.
 
 ## Review a statement's institution, account and dates
 
