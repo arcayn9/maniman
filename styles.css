@@ -609,3 +609,5 @@ code { padding: 2px 5px; border-radius: 4px; background: var(--surface-tint); co
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+.account-status { margin: 0; padding: 12px 14px; border: 1px solid var(--success-line); border-radius: var(--radius-small); background: var(--success-bg); color: var(--green); line-height: 1.6; }

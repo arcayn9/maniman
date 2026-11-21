@@ -216,3 +216,111 @@ test("transient cloud errors preserve retry, while a failed revision CAS is a co
   app.evaluate("cloud.client = fakeClient"); await app.call("saveStateToCloud");
   assert.equal(app.evaluate("secureRemoteConflict"), true);
 });
+
+test("cloud account access precedes vault setup and can explicitly choose local-only mode", async () => {
+  const app = harness(), order = [], prefs = new Map();
+  app.context.localStorage = { getItem: (key) => prefs.get(key) || null, setItem: (key, value) => prefs.set(key, value), removeItem: (key) => prefs.delete(key) };
+  app.context.ManimanAccountAccess = { requestSession: async () => { order.push("account"); return { mode: "cloud", session: { user: { id: "owner-A" } } }; } };
+  app.context.recordOrder = () => order.push("vault");
+  app.evaluate("initCloudClient = async () => { cloud.configured = true; }; registerServiceWorker = () => {}; bindVaultControls = () => {}; loadState = async () => { if (!cloud.user) throw Error('Account must precede vault'); recordOrder(); return state; };");
+  await app.call("init");
+  assert.deepEqual(order, ["account", "vault"]);
+  assert.equal(prefs.get("maniman-access-mode"), "cloud");
+  app.evaluate("cloud.user = null");
+  app.context.ManimanAccountAccess.requestSession = async () => ({ mode: "local", session: null });
+  await app.call("chooseAccountBeforeVault");
+  assert.equal(prefs.get("maniman-access-mode"), "local");
+});
+
+test("stale refresh tokens return to account sign-in without deleting encrypted storage", async () => {
+  const app = harness(); const signedOut = [];
+  const before = JSON.stringify(app.secure.getEnvelope());
+  app.context.MANIMAN_CONFIG = { supabaseUrl: "https://example.invalid", supabaseAnonKey: "synthetic" };
+  app.context.supabase = { createClient: (_url, _key, options) => {
+    assert.equal(options.auth.persistSession, true);
+    return { auth: { getSession: async () => ({ data: { session: null }, error: { code: "refresh_token_not_found", message: "Invalid Refresh Token" } }), signOut: async (options) => { signedOut.push(options); return { error: null }; }, onAuthStateChange() {} } };
+  } };
+  await app.call("initCloudClient");
+  assert.equal(app.evaluate("cloud.user"), null);
+  assert.match(app.evaluate("cloud.authNotice"), /session expired/);
+  assert.equal(signedOut[0].scope, "local");
+  assert.equal(JSON.stringify(app.secure.getEnvelope()), before);
+  assert.equal(app.saves, 0);
+});
+
+test("a fresh device cannot create a separate vault after a failed cloud read", async () => {
+  const app = harness(); app.envelope(null);
+  app.context.fakeClient = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: "FETCH_ERROR" } }) }) }) }) };
+  app.evaluate('cloud.user = {id:"owner-A"}; cloud.client = fakeClient;');
+  await assert.rejects(app.call("loadState"), /no separate empty vault was created/);
+  assert.equal(app.accessRequests, 0);
+});
+
+test("a clean local replica adopts a newer same-vault cloud copy before rendering", async () => {
+  const app = harness(); const previous = { format: "test-vault", vaultId: "same-vault", revision: 2 };
+  const next = { ...previous, revision: 3 };
+  app.envelope(previous);
+  app.secure.isAcknowledged = async () => true;
+  app.secure.adoptRemote = async (candidate) => { app.envelope(candidate); return baseState(); };
+  app.secure.acknowledge = async () => {};
+  app.context.fakeClient = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { state: next, revision: 9 }, error: null }) }) }) }) };
+  app.evaluate('cloud.user = {id:"owner-A"}; cloud.client = fakeClient;');
+  await app.call("loadState");
+  assert.equal(app.secure.getEnvelope().revision, 3);
+  assert.equal(app.evaluate("secureRemoteConflict"), false);
+});
+
+test("unsynced local work is retained when the cloud still matches the acknowledged baseline", async () => {
+  const app = harness(); app.envelope({ format: "test-vault", vaultId: "same-vault", revision: 4 });
+  app.secure.isAcknowledged = async (candidate) => candidate?.revision === 3;
+  app.context.fakeClient = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { state: { format: "test-vault", vaultId: "same-vault", revision: 3 }, revision: 7 }, error: null }) }) }) }) };
+  app.evaluate('cloud.user = {id:"owner-A"}; cloud.client = fakeClient;');
+  await app.call("loadState");
+  assert.equal(app.secure.getEnvelope().revision, 4);
+  assert.equal(app.evaluate("secureRemoteConflict"), false);
+});
+
+test("an acknowledged replica does not write an identical snapshot on each reload", async () => {
+  const app = harness(); let writes = 0;
+  app.owner("user:owner-A"); app.secure.isAcknowledged = async () => true;
+  app.context.fakeClient = { from() { writes += 1; throw Error("unexpected redundant write"); } };
+  app.evaluate('cloud.user = {id:"owner-A"}; cloud.client = fakeClient;');
+  await app.call("saveStateToCloud");
+  assert.equal(writes, 0);
+  assert.equal(app.evaluate("syncStatus"), "synced");
+});
+
+test("configured account access cannot silently fall back to a new local vault when its SDK is unavailable", async () => {
+  const app = harness();
+  app.context.MANIMAN_CONFIG = { supabaseUrl: "https://example.invalid", supabaseAnonKey: "synthetic" };
+  await assert.rejects(app.call("initCloudClient"), /sign-in component could not load/);
+  app.context.MANIMAN_CONFIG = { supabaseUrl: "https://example.invalid" };
+  await assert.rejects(app.call("initCloudClient"), /configuration is incomplete/);
+  assert.equal(app.accessRequests, 0); assert.equal(app.saves, 0);
+});
+
+test("divergent legacy cloud records are encrypted and preserved instead of replacing the device ledger", async () => {
+  const app = harness(), device = baseState(), olderCloud = baseState();
+  device.settings.selectedMonth = "2026-11"; olderCloud.settings.selectedMonth = "2026-10";
+  const before = JSON.stringify(app.secure.getEnvelope()); let preserved;
+  app.secure.preserveStateConflict = async (value) => { preserved = value; return { format: "test-vault", revision: 2 }; };
+  app.context.ManimanVaultAccess.requestAccess = async () => device;
+  app.context.fakeClient = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { state: olderCloud, revision: 1 }, error: null }) }) }) }) };
+  app.evaluate('cloud.user = {id:"owner-A"}; cloud.client = fakeClient;');
+  assert.equal((await app.call("loadState")).settings.selectedMonth, "2026-11");
+  assert.equal(preserved.settings.selectedMonth, "2026-10");
+  assert.equal(app.evaluate("secureRemoteConflict"), true);
+  assert.equal(JSON.stringify(app.secure.getEnvelope()), before);
+});
+
+test("manual cloud refresh cannot replace unsaved edits after a failed device save", async () => {
+  const app = harness(); app.owner("user:owner-A");
+  app.evaluate('cloud.user = {id:"owner-A"};');
+  app.secure.flush = async () => { throw new Error("synthetic device write failure"); };
+  const before = JSON.stringify(app.getState());
+  app.context.fakeClient = { from() { throw new Error("Cloud must not be read after failed local flush"); } };
+  app.evaluate("cloud.client = fakeClient");
+  await app.call("syncCloudNow");
+  assert.equal(JSON.stringify(app.getState()), before);
+  assert.match(app.messages.at(-1), /encrypted copies are preserved/);
+});

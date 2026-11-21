@@ -4,7 +4,7 @@ const path = require("node:path");
 const { isEnvelope } = require("./lib/secure-storage.js");
 
 const ROOT = __dirname;
-const PUBLIC_FILES = new Set(["index.html", "app.js", "styles.css", "sw.js", "config.js", "manifest.webmanifest", "icons/maniman-icon.svg", "lib/statement-contract.js", "lib/secure-storage.js", "lib/vault-access.js", "lib/user-guide.js", "vendor/supabase-2.119.0.js"]);
+const PUBLIC_FILES = new Set(["index.html", "app.js", "styles.css", "sw.js", "config.js", "manifest.webmanifest", "icons/maniman-icon.svg", "lib/statement-contract.js", "lib/secure-storage.js", "lib/vault-access.js", "lib/user-guide.js", "lib/account-access.js", "lib/vault-session.js", "lib/session-broker.js", "vendor/supabase-2.119.0.js"]);
 const TYPES = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".webmanifest": "application/manifest+json", ".svg": "image/svg+xml" };
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 function json(response, status, value) {

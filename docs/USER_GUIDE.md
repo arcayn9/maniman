@@ -6,8 +6,8 @@ Open **User’s Guide** in the desktop sidebar or the mobile three-line App menu
 
 Create a private workspace and add the accounts you use.
 
-1. Open Maniman using HTTPS or localhost. Choose a vault passphrase of at least 12 characters and repeat it.
-2. Select Create encrypted vault. Save the recovery key somewhere separate from your encrypted backup, then paste it into the verification field and continue.
+1. Open Maniman using HTTPS or localhost. If cloud login is configured, sign in or create your account first, or explicitly choose local-only use. Unlock an existing account vault with its existing passphrase; create a passphrase of at least 12 characters only when setting up a new vault.
+2. For a new vault, select Create encrypted vault. Save the recovery key somewhere separate from your encrypted backup, then paste it into the verification field and continue. An existing local-only vault can be explicitly adopted for an empty cloud account without deleting its original copy.
 3. Open Accounts. Add your real bank, card, cash and wallet accounts with their opening balances and dates. The initial Main account is a placeholder you can use or replace after adding another account.
 4. Open Transactions to add a payment, or Imports & review to bring in statements. New vaults use Indian rupees (INR, ₹).
 5. Open Settings → Export encrypted backup and keep the downloaded file. Repeat after important imports or changes.
@@ -287,9 +287,10 @@ Protect the active session and recover with your saved key.
 1. To leave the app safely, use Lock vault in the desktop Vault or mobile App menu. Inactivity also locks after your configured timeout.
 2. To return, enter the vault passphrase and select Unlock workspace. Password-manager use and paste are supported.
 3. If you cannot use the passphrase, select Use recovery key on the unlock screen and paste the recovery key you saved during setup.
-4. After unlocking, export an encrypted backup and keep the recovery key secure.
+4. An active tab can normally reload without another unlock until it locks. A browser restart, suspended or reclaimed worker, or unsupported browser may require your passphrase again; this does not erase records.
+5. After unlocking, export an encrypted backup and keep the recovery key secure.
 
-There is no implemented in-app passphrase-change or recovery-key-rotation screen. If both the passphrase and recovery key are lost, cloud password reset cannot decrypt the records. Locking clears active access; it does not erase the encrypted vault.
+There is no implemented in-app passphrase-change or recovery-key-rotation screen. If both the passphrase and recovery key are lost, cloud password reset cannot decrypt the records. Locking clears active access; it does not erase the encrypted vault. Reload convenience uses a nonextractable key held only in service-worker RAM and a random per-tab capability in sessionStorage. No vault passphrase, recovery key or decryption key is persisted for it.
 
 ## Import an older whole-app JSON backup
 
@@ -307,13 +308,15 @@ Selecting versioned statement JSON here routes to statement review instead. Olde
 
 Use configured hosting while keeping vault credentials separate.
 
-1. Open Settings → Cloud sync. If it says cloud sync is disabled, continue local use; a maintainer must configure and validate the hosted service first.
-2. When configured, enter your cloud email and password and choose Sign in, or Create account. Follow email confirmation if the host requires it.
-3. Unlock the active account's vault when prompted. Cloud accounts and the local-only vault use separate storage namespaces; signing in is not an automatic migration of your local-only records.
-4. Use Sync now when available and check the reported status. If a conflict is shown, export both encrypted copies before attempting recovery; do not overwrite either one.
-5. Before switching devices or signing out, export an encrypted backup and verify the latest sync status. Use Sign out to leave the cloud account.
+1. On a configured host, sign in before vault unlock, or choose Create a new account. Enter an account password of at least 6 characters for registration. Follow confirmation if required; Resend confirmation email is available on the sign-in screen and in Settings → Cloud sync.
+2. Unlock the account vault with its vault passphrase or recovery key. On your phone and laptop, use the same account and the same vault secret. Account password and vault passphrase serve different purposes.
+3. If your account has no encrypted vault yet, create one or explicitly choose the existing local-only vault on this browser. For older cloud records, the local vault’s key can protect those records without merging the two datasets. The original local copy is retained.
+4. Use Settings → Cloud sync → Sync now and check the reported status before changing devices. A clean device can receive a newer cloud snapshot; conflicting edits are preserved and must be exported before recovery.
+5. Local-only use remains available without an account. Choose Change account on the vault screen to return to cloud sign-in, or sign in through Settings after unlocking. Use Sign out to leave the cloud account.
 
-Encrypted sync code exists, but live two-device enrollment, merge/conflict recovery and hosted owner-isolation validation remain release work. Do not assume a fresh second-device vault will merge automatically. PDF conversion remains local; cloud login information and sync metadata are separate from encrypted financial contents.
+Registration acceptance is not proof of email delivery. If account credentials are rejected, use the account password, not the vault passphrase. A stale session returns to sign-in without deleting encrypted data. If cloud reads fail on a new device, reconnect and use Retry opening workspace rather than creating a competing vault.
+
+Only encrypted financial snapshots sync. Account identity, authentication tokens and sync metadata are separate. Live email delivery and physical phone/laptop checks remain release validation; automatic merge and overwrite resolution are not implemented.
 
 ## Start fresh or load starter data
 

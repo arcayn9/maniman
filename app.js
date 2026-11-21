@@ -72,6 +72,7 @@ let pendingStatementImport = null;
 let secureAuthEpoch = 0;
 let secureServerSyncQueue = Promise.resolve();
 let vaultOperationDepth = 0;
+let accountGateActive = false;
 
 const cloud = {
   configured: false,
@@ -80,15 +81,31 @@ const cloud = {
   revision: null,
   saving: false,
   pendingSave: false,
-  lastError: ""
+  lastError: "",
+  readFailed: false,
+  authNotice: ""
 };
 
 const dom = {};
 
-document.addEventListener("DOMContentLoaded", () => init().catch((error) => {
+document.addEventListener("DOMContentLoaded", () => init().catch(showStartupError));
+
+function showStartupError(error) {
   const root = document.querySelector("#viewRoot");
-  if (root) root.textContent = `${error?.message || "Maniman could not open encrypted storage. Use HTTPS or localhost with Web Crypto and IndexedDB support."} Existing data has not been replaced.`;
-}));
+  if (!root) return;
+  const message = document.createElement("p"); message.setAttribute("role", "alert");
+  message.textContent = `${error?.message || "Maniman could not open encrypted storage. Use HTTPS or localhost with Web Crypto and IndexedDB support."} Existing data has not been replaced.`;
+  const retry = document.createElement("button"); retry.type = "button"; retry.className = "button"; retry.textContent = "Retry opening workspace";
+  retry.addEventListener("click", () => location.reload());
+  root.replaceChildren(message, retry);
+  if (cloud.configured) {
+    const change = document.createElement("button"); change.type = "button"; change.className = "button ghost"; change.textContent = "Change account";
+    change.addEventListener("click", async () => {
+      try { await changeAccountBeforeUnlock(); } catch (issue) { message.textContent = issue.message; }
+    }); root.append(change);
+  }
+  const shell = document.querySelector(".shell"); if (shell) shell.inert = false;
+}
 
 async function init() {
   dom.viewRoot = document.querySelector("#viewRoot");
@@ -103,7 +120,9 @@ async function init() {
   dom.navItems = Array.from(document.querySelectorAll(".nav-item"));
   dom.localBadge = document.querySelector(".local-badge");
 
+  registerServiceWorker();
   await initCloudClient();
+  await chooseAccountBeforeVault();
   state = await loadState();
   bindVaultControls();
   activeView = state.settings.lastView === "wallets" ? "accounts" : state.settings.lastView || "dashboard";
@@ -146,8 +165,9 @@ async function init() {
   dom.importFile.addEventListener("change", importData);
   dom.mobileImportFile.addEventListener("change", importData);
 
-  registerServiceWorker();
   render();
+  window.ManimanVaultSession?.remember(window.ManimanSecureStorage, state.settings.vaultAutoLockMinutes || 15);
+  if (cloud.user && !secureRemoteConflict) await syncEncryptedState();
 }
 
 function emptyVaultState() {
@@ -348,18 +368,39 @@ async function loadState() {
     throw new Error("The existing remote vault is unreadable or uses an unsupported format. Preserve that copy and recover it before creating or syncing another vault.");
   }
   const localEnvelope = secure.getEnvelope();
+  if (ownerId && cloud.readFailed && !localEnvelope) throw new Error("The cloud vault could not be checked. Reconnect and retry; no separate empty vault was created on this device.");
+  let refreshEnvelope = null;
   if (localEnvelope && encryptedRemote && stableStatementStringify(localEnvelope) !== stableStatementStringify(encryptedRemote)) {
-    await secure.preserveConflict(encryptedRemote);
-    secureRemoteConflict = true;
-    syncStatus = "cloud-conflict";
-    cloud.lastError = "Another encrypted snapshot exists. Your local vault is preserved. Export both copies before resolving this conflict.";
-    cloud.conflictEnvelope = encryptedRemote;
+    const clean = typeof secure.isAcknowledged === "function" && await secure.isAcknowledged();
+    const pendingOnly = ownerId && localEnvelope.vaultId === encryptedRemote.vaultId && localEnvelope.revision > encryptedRemote.revision && typeof secure.isAcknowledged === "function" && await secure.isAcknowledged(encryptedRemote);
+    if (pendingOnly) { /* Only this device changed since its acknowledged cloud copy. */ }
+    else if (ownerId && clean && localEnvelope.vaultId === encryptedRemote.vaultId && encryptedRemote.revision > localEnvelope.revision) refreshEnvelope = encryptedRemote;
+    else {
+      await secure.preserveConflict(encryptedRemote);
+      secureRemoteConflict = true;
+      syncStatus = "cloud-conflict";
+      cloud.lastError = "Another encrypted snapshot exists. Your local vault is preserved. Export both copies before resolving this conflict.";
+      cloud.conflictEnvelope = encryptedRemote;
+    }
   }
   const legacy = !localEnvelope && !encryptedRemote
     ? (recognizedLegacy ? remote : (!ownerId ? loadCachedState() : null))
     : null;
   const initialState = legacy ? prepareBackupState(legacy) : emptyVaultState();
-  const opened = await window.ManimanVaultAccess.requestAccess({ initialState, remoteEnvelope: encryptedRemote, migration: !!legacy });
+  const localCandidate = ownerId && !localEnvelope && !encryptedRemote && !cloud.readFailed && typeof secure.localCandidate === "function" ? await secure.localCandidate() : null;
+  const accountLabel = ownerId ? `Cloud account: ${cloud.user.email || "signed in"}. This vault uses the same passphrase on all your devices.` : "Local-only vault on this browser. Account sign-in and vault unlock are separate.";
+  let opened = await window.ManimanVaultSession?.resume(secure);
+  if (!opened) opened = await window.ManimanVaultAccess.requestAccess({ initialState, remoteEnvelope: encryptedRemote, migration: !!legacy, localCandidate, accountLabel, onChangeAccount: cloud.configured ? changeAccountBeforeUnlock : null });
+  if (refreshEnvelope) opened = await secure.adoptRemote(refreshEnvelope);
+  if (ownerId && recognizedLegacy && localEnvelope) {
+    const oldCloud = prepareBackupState(remote);
+    if (stableStatementStringify(oldCloud) !== stableStatementStringify(prepareBackupState(opened))) {
+      cloud.conflictEnvelope = await secure.preserveStateConflict(oldCloud);
+      secureRemoteConflict = true; syncStatus = "cloud-conflict";
+      cloud.lastError = "Your device vault and older cloud records differ. Both copies are preserved; export both before choosing which to keep.";
+    }
+  }
+  if (ownerId && encryptedRemote && !secureRemoteConflict && typeof secure.acknowledge === "function" && stableStatementStringify(secure.getEnvelope()) === stableStatementStringify(encryptedRemote)) await secure.acknowledge(encryptedRemote);
   if (!vaultContextMatches(owner)) throw new Error("Vault owner changed while unlocking. Reload to open the active account.");
   // Only remove browser plaintext after the encrypted copy and recovery exercise succeed.
   if (legacy && !ownerId) {
@@ -436,6 +477,7 @@ function bindVaultControls() {
   const lock = async () => {
     try { await window.ManimanSecureStorage.flush(); }
     catch (_) { showToast("Save failed. Keep this tab open and retry before locking."); return; }
+    window.ManimanVaultSession?.forget();
     window.ManimanSecureStorage.lock();
     window.dispatchEvent(new Event("maniman-vault-locked"));
     state = null;
@@ -444,12 +486,18 @@ function bindVaultControls() {
   };
   document.querySelector("#vaultLockBtn")?.addEventListener("click", lock);
   document.querySelector("#mobileVaultLockBtn")?.addEventListener("click", lock);
+  let deadline = 0;
   const resetTimer = () => {
+    if (deadline && Date.now() >= deadline) { lock(); return; }
     clearTimeout(secureInactivityTimer);
     const minutes = Number(state?.settings?.vaultAutoLockMinutes || 15);
-    secureInactivityTimer = setTimeout(lock, Math.max(1, Math.min(120, minutes)) * 60000);
+    const delay = Math.max(1, Math.min(120, minutes)) * 60000;
+    deadline = Date.now() + delay;
+    secureInactivityTimer = setTimeout(lock, delay);
+    window.ManimanVaultSession?.touch();
   };
   for (const event of ["pointerdown", "keydown"]) document.addEventListener(event, resetTimer, { passive: true });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && deadline && Date.now() >= deadline) lock(); });
   resetTimer();
 }
 
@@ -457,13 +505,19 @@ async function initCloudClient() {
   const config = window.MANIMAN_CONFIG || {};
   const supabaseUrl = String(config.supabaseUrl || "").trim();
   const supabaseAnonKey = String(config.supabaseAnonKey || "").trim();
-  if (!supabaseUrl || !supabaseAnonKey || !window.supabase?.createClient) return;
+  if (!supabaseUrl && !supabaseAnonKey) return;
+  if (!supabaseUrl || !supabaseAnonKey) throw new Error("Cloud account configuration is incomplete. Ask the host to configure both public connection values, then retry.");
+  if (!window.supabase?.createClient) throw new Error("The account sign-in component could not load. Reconnect and retry opening the workspace.");
 
   cloud.configured = true;
-  cloud.client = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+  cloud.client = window.supabase.createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
 
-  const { data } = await cloud.client.auth.getSession();
-  cloud.user = data?.session?.user || null;
+  const { data, error } = await cloud.client.auth.getSession();
+  if (error && (/refresh_token|session_not_found/.test(error.code || "") || /refresh token/i.test(error.message || ""))) {
+    await cloud.client.auth.signOut({ scope: "local" });
+    cloud.authNotice = "Your previous account session expired. Sign in again; your encrypted vault has been preserved.";
+  }
+  cloud.user = error ? null : data?.session?.user || null;
 
   cloud.client.auth.onAuthStateChange((_event, session) => {
     const previousUser = cloud.user?.id || null;
@@ -472,6 +526,7 @@ async function initCloudClient() {
     // Invalidate decrypted state immediately; queued work must never cross owners.
     secureAuthEpoch += 1;
     clearTimeout(secureInactivityTimer);
+    window.ManimanVaultSession?.forget();
     window.ManimanSecureStorage?.lock();
     window.dispatchEvent(new Event("maniman-vault-locked"));
     clearStatementImport();
@@ -481,12 +536,14 @@ async function initCloudClient() {
     const shell = document.querySelector(".shell");
     if (shell) shell.inert = true;
     // Auth callbacks must not await calls back into the auth client.
-    setTimeout(() => location.reload(), 0);
+    if (cloud.user) { try { localStorage.setItem("maniman-access-mode", "cloud"); } catch (_) {} }
+    if (!accountGateActive) setTimeout(() => location.reload(), 0);
   });
 }
 
 async function loadStateFromCloud() {
   if (!cloud.client || !cloud.user) return null;
+  cloud.readFailed = false;
   const ownerId = cloud.user.id;
   const epoch = secureAuthEpoch;
   storageMode = "cloud";
@@ -503,6 +560,7 @@ async function loadStateFromCloud() {
   } catch (error) {
     if (epoch !== secureAuthEpoch || ownerId !== cloud.user?.id) throw new Error("Vault owner changed while reading cloud storage.");
     if (error.preserveVault) throw error;
+    cloud.readFailed = true;
     cloud.lastError = "Cloud is unavailable. The encrypted browser vault remains available; reconnect before syncing.";
     syncStatus = "cloud-unavailable";
     return null;
@@ -517,7 +575,7 @@ function loadCachedState() {
 }
 
 async function saveStateToCloud() {
-  if (!cloud.client || !cloud.user || secureRemoteConflict || !window.ManimanSecureStorage?.isUnlocked()) return;
+  if (!cloud.client || !cloud.user || cloud.readFailed || secureRemoteConflict || !window.ManimanSecureStorage?.isUnlocked()) return;
   const owner = captureVaultContext();
   const client = cloud.client;
   if (owner.namespace !== `user:${owner.ownerId}`) return;
@@ -529,6 +587,7 @@ async function saveStateToCloud() {
   try {
     await window.ManimanSecureStorage.flush();
     if (!vaultContextMatches(owner)) return;
+    if (typeof window.ManimanSecureStorage.isAcknowledged === "function" && await window.ManimanSecureStorage.isAcknowledged()) { syncStatus = "synced"; return; }
     const currentRevision = Number(cloud.revision || 0);
     const payload = { user_id: owner.ownerId, state: window.ManimanSecureStorage.getEnvelope(), revision: currentRevision + 1, updated_at: new Date().toISOString() };
     const query = currentRevision === 0
@@ -545,6 +604,7 @@ async function saveStateToCloud() {
       return;
     }
     cloud.revision = Number(data.revision);
+    if (typeof window.ManimanSecureStorage.acknowledge === "function") await window.ManimanSecureStorage.acknowledge(payload.state);
     syncStatus = "synced";
     cloud.lastError = "";
   } catch (_) {
@@ -561,37 +621,88 @@ async function saveStateToCloud() {
   }
 }
 
+async function chooseAccountBeforeVault() {
+  if (!cloud.configured || cloud.user) return;
+  let localOnly = false;
+  try { localOnly = localStorage.getItem("maniman-access-mode") === "local"; } catch (_) {}
+  if (localOnly) return;
+  accountGateActive = true;
+  try {
+    const choice = await window.ManimanAccountAccess.requestSession({ client: cloud.client, notice: cloud.authNotice });
+    cloud.user = choice.session?.user || null;
+    try { localStorage.setItem("maniman-access-mode", choice.mode); } catch (_) {}
+  } finally { accountGateActive = false; }
+}
+
+async function syncCloudNow() {
+  try { return await reconcileCloudNow(); }
+  catch (_) { showToast("Cloud sync could not complete. Your encrypted copies are preserved; reconnect and retry."); }
+}
+
+async function reconcileCloudNow() {
+  if (!cloud.user || !window.ManimanSecureStorage?.isUnlocked()) return;
+  const owner = captureVaultContext();
+  await window.ManimanSecureStorage.flush();
+  if (!vaultContextMatches(owner)) return;
+  const remote = await loadStateFromCloud();
+  if (!vaultContextMatches(owner) || cloud.readFailed) return showToast(cloud.lastError);
+  const local = window.ManimanSecureStorage.getEnvelope();
+  if (remote && stableStatementStringify(remote) !== stableStatementStringify(local)) {
+    if (window.ManimanVault.isEnvelope(remote) && remote.vaultId === local.vaultId && local.revision > remote.revision && await window.ManimanSecureStorage.isAcknowledged?.(remote)) {
+      secureRemoteConflict = false; return saveStateToCloud();
+    }
+    if (window.ManimanVault.isEnvelope(remote) && remote.vaultId === local.vaultId && remote.revision > local.revision && await window.ManimanSecureStorage.isAcknowledged?.()) {
+      state = prepareBackupState(await window.ManimanSecureStorage.adoptRemote(remote));
+      secureRemoteConflict = false; cloud.conflictEnvelope = null; render();
+      return showToast("Latest encrypted cloud vault opened on this device.");
+    }
+    if (!window.ManimanVault.isEnvelope(remote)) return showToast("The cloud copy needs migration or recovery. Keep your encrypted backup before proceeding.");
+    await window.ManimanSecureStorage.preserveConflict(remote);
+    secureRemoteConflict = true; cloud.conflictEnvelope = remote; syncStatus = "cloud-conflict";
+    render(); return showToast("Both copies were preserved. Export them before resolving conflicting changes.");
+  }
+  secureRemoteConflict = false;
+  return saveStateToCloud();
+}
+
 async function signInToCloud(email, password) {
-  if (!cloud.client) {
-    showToast("Add Supabase config before using cloud sync.");
-    return;
-  }
-  const { error } = await cloud.client.auth.signInWithPassword({ email, password });
-  if (error) {
-    showToast(error.message || "Could not sign in.");
-    return;
-  }
-  showToast("Signed in. Cloud sync is ready.");
+  if (!cloud.client) return showToast("Cloud sign-in is unavailable until the host configures it.");
+  try {
+    if (window.ManimanSecureStorage?.isUnlocked()) await window.ManimanSecureStorage.flush();
+    await window.ManimanAccountAccess.perform(cloud.client, "signin", email, password);
+    showToast("Signed in. Opening your account's vault.");
+  } catch (error) { showToast(window.ManimanAccountAccess.errorMessage(error)); }
 }
 
 async function signUpForCloud(email, password) {
-  if (!cloud.client) {
-    showToast("Add Supabase config before using cloud sync.");
-    return;
-  }
-  const { error } = await cloud.client.auth.signUp({ email, password });
-  if (error) {
-    showToast(error.message || "Could not create account.");
-    return;
-  }
-  showToast("Account created. Check email if confirmation is enabled.");
+  if (!cloud.client) return showToast("Cloud registration is unavailable until the host configures it.");
+  try {
+    if (window.ManimanSecureStorage?.isUnlocked()) await window.ManimanSecureStorage.flush();
+    const data = await window.ManimanAccountAccess.perform(cloud.client, "signup", email, password);
+    showToast(data.session ? "Account ready. Opening your vault." : "Registration accepted. If confirmation is required, check your inbox and spam folder before signing in.");
+  } catch (error) { showToast(window.ManimanAccountAccess.errorMessage(error)); }
+}
+
+async function resendCloudConfirmation(email) {
+  if (!email?.trim()) return showToast("Enter your account email first.");
+  try {
+    await window.ManimanAccountAccess.perform(cloud.client, "resend", email, "");
+    showToast("Confirmation requested. If needed, check your inbox and spam folder.");
+  } catch (error) { showToast(window.ManimanAccountAccess.errorMessage(error)); }
+}
+
+async function changeAccountBeforeUnlock() {
+  try { localStorage.setItem("maniman-access-mode", "cloud"); } catch (_) {}
+  window.ManimanVaultSession?.forget();
+  if (cloud.user) return signOutOfCloud();
+  window.ManimanSecureStorage?.lock(); location.reload();
 }
 
 async function signOutOfCloud() {
   if (!cloud.client) return;
   await window.ManimanSecureStorage.flush();
   const { error } = await cloud.client.auth.signOut();
-  if (error) showToast("Could not sign out. Your encrypted local vault is preserved.");
+  if (error) throw new Error("Could not sign out. Your encrypted local vault is preserved; reconnect and retry.");
 }
 
 function normalizeState(value = {}) {
@@ -1715,12 +1826,13 @@ function renderCloudSyncSettings() {
         <input id="cloudEmail" class="control" type="email" autocomplete="email" required>
       </label>
       <label class="field span-6">
-        <span class="field-label">Password</span>
+        <span class="field-label">Account password</span>
         <input id="cloudPassword" class="control" type="password" autocomplete="current-password" minlength="6" required>
       </label>
       <div class="span-12 row-actions">
         <button class="button" type="submit">Sign in</button>
         <button id="cloudSignUpBtn" class="button ghost" type="button">Create account</button>
+        <button id="cloudResendBtn" class="button ghost" type="button">Resend confirmation email</button>
       </div>
     </form>
   `;
@@ -2237,38 +2349,35 @@ function bindSettingsEvents() {
 
 function bindCloudSettingsEvents() {
   const authForm = document.querySelector("#cloudAuthForm");
+  document.querySelector("#cloudResendBtn")?.addEventListener("click", () => resendCloudConfirmation(document.querySelector("#cloudEmail").value));
   const signUpButton = document.querySelector("#cloudSignUpBtn");
   const signOutButton = document.querySelector("#cloudSignOutBtn");
   const saveNowButton = document.querySelector("#cloudSaveNowBtn");
   document.querySelector("#cloudConflictExportBtn")?.addEventListener("click", () => window.ManimanVaultAccess.downloadEnvelope(cloud.conflictEnvelope));
 
-  if (authForm) {
-    authForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-      signInToCloud(
-        document.querySelector("#cloudEmail").value.trim(),
-        document.querySelector("#cloudPassword").value
-      );
-    });
-  }
-
-  if (signUpButton) {
-    signUpButton.addEventListener("click", () => {
-      signUpForCloud(
-        document.querySelector("#cloudEmail").value.trim(),
-        document.querySelector("#cloudPassword").value
-      );
-    });
-  }
+  let authenticating = false;
+  const runAccountAction = async (action) => {
+    if (authenticating) return;
+    authenticating = true;
+    const email = document.querySelector("#cloudEmail"), password = document.querySelector("#cloudPassword");
+    const controls = Array.from(authForm.querySelectorAll("input,button"));
+    controls.forEach((control) => { control.disabled = true; });
+    try { await action(email.value.trim(), password.value); }
+    finally {
+      authenticating = false; password.value = "";
+      controls.forEach((control) => { control.disabled = false; });
+    }
+  };
+  if (authForm) authForm.addEventListener("submit", (event) => { event.preventDefault(); return runAccountAction(signInToCloud); });
+  if (signUpButton) signUpButton.addEventListener("click", () => runAccountAction(signUpForCloud));
 
   if (signOutButton) {
-    signOutButton.addEventListener("click", signOutOfCloud);
+    signOutButton.addEventListener("click", () => signOutOfCloud().catch((error) => showToast(error.message)));
   }
 
   if (saveNowButton) {
     saveNowButton.addEventListener("click", () => {
-      saveStateToCloud();
-      showToast("Sync started.");
+      syncCloudNow();
     });
   }
 }
