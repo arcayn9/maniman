@@ -49,4 +49,4 @@ Common actions use locally embedded Lucide SVGs: pencil, trash, plus, save, canc
 
 ## In-app User’s Guide
 
-User’s Guide is available from the desktop sidebar and mobile App menu. Its 28 numbered walkthroughs describe implemented features and explicit limits. Search and five topic groups operate entirely in the browser; matching topics expand without injecting search input into HTML. Context buttons open the relevant app screens. The guide ships in the offline app shell. `docs/USER_GUIDE.md` is generated from the same catalog and checked for drift by tests.
+User’s Guide is available from the desktop sidebar and mobile App menu. Its 29 numbered walkthroughs describe implemented features and explicit limits. Search and five topic groups operate entirely in the browser; matching topics expand without injecting search input into HTML. Context buttons open the relevant app screens. The guide ships in the offline app shell. `docs/USER_GUIDE.md` is generated from the same catalog and checked for drift by tests.
