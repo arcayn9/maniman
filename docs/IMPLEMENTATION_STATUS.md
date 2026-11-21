@@ -33,7 +33,7 @@ Current Node suite: **78/78 passed**. UI regression coverage adds imports routin
 
 ## Current limits and release gates
 
-1. Converter support is the tested generic explicit-column layout, not universal HDFC/ICICI/SBI coverage. Multi-account PDFs need local splitting until a dedicated profile exists. OCR output is deliberately partial and must be corrected locally before app commitment; an interactive review tool/skill wrapper is follow-up work.
+1. Converter support is the tested generic explicit-column layout and the ruled Value Date/Post Date grid profile, not universal HDFC/ICICI/SBI coverage. Multi-account PDFs need local splitting until a dedicated profile exists. OCR output is deliberately partial and must be corrected locally before app commitment; an interactive review tool/skill wrapper is follow-up work.
 2. Reporting remains one currency per vault, with legacy major-unit arithmetic; currency relabeling after financial data exists is blocked. Full minor-unit domain/report migration remains future work.
 3. Reconciliation currently supports source-identity reimports, explicit linking and user-selected transfers/treatment. Automatic reference/fuzzy reconciliation, refund economic types and richer classification rules remain M3–M4.
 4. Encrypted backups, separate owner namespaces, conflict preservation and revision-checked writes are implemented. Full multi-device enrollment/merge UI and hosted operational validation remain M1; browser QA must complete before claiming a verified release.
@@ -94,3 +94,12 @@ Phone/laptop account access reuses the same cloud envelope and passphrase/recove
 Read-only hosted checks verified `app_states` RLS and owner SELECT/INSERT/UPDATE policies. Provider logs showed rejected credentials, an invalid refresh token and signup without a valid password. No SMTP error was established. No live user records, auth settings, schema, real statements or exported vault files were changed.
 
 Verification: **107 Node tests** and **20 Python converter tests** pass. Regression coverage includes account-first ordering, signup/resend, owner races, stale tokens, RAM reload/expiry/revocation, two-device same-secret encryption, clean refresh, dirty conflicts and legacy/local migration. Static build and Wrangler version-upload dry-run pass. The local Cloudflare runtime served all 15 public assets, blocked 9 private/API paths and rejected state writes. Native browser verification was interrupted by active browser use; visual reload behavior, live email delivery and physical phone/laptop checks remain pending. No production activation was performed.
+
+
+## Value/Post Date statement layout — 2026-11-21
+
+Converter 0.2.0 adds `value-post-grid-v1` from the user-provided cropped column reference. It recognizes Value Date, Post Date, Details, wrapped Ref No/Cheque No, explicit rupee debit/credit labels and Balance. Ruled-PDF cell extraction retains empty direction columns and in-cell wrapped text. Post Date supplies the ledger date while both source dates remain available. Matching headerless continuations are supported; ambiguous/orphan content stays review-required. Bank identity is extracted only from explicit document text.
+
+Synthetic tests cover actual grid PDFs, repeated headers, headerless/changed-column continuations, multiline narration, blank debit/credit cells, currency conflict and invalid rows. The new profile also passes converter → app reviewed import → encrypted persistence → reload → undo validation. The user's private PDF was not read, existing private JSON was not modified, and private files/screenshots were not copied into fixtures; actual bank-file validation is a user-run local step. This local-tool change requires no hosted-app deployment.
+
+Validation for this increment: 108 Node tests and 28 Python converter tests pass, including actual synthetic grid PDFs and negative extraction cases. The app pipeline validates the new profile through import, encrypted persistence, reload and undo.

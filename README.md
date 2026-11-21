@@ -20,7 +20,7 @@ The server binds to loopback by default. Non-loopback hosting requires `MANIMAN_
 
 ## Local PDF conversion and statement JSON import
 
-The first implementation increment adds a local converter, a versioned statement contract, a staged importer, and encrypted persistence. The converter currently supports a tested generic explicit-column bank layout; it does not yet claim support for every bank PDF.
+The first implementation increment adds a local converter, a versioned statement contract, a staged importer, and encrypted persistence. The converter supports tested generic explicit-column statements and ruled Value Date/Post Date grids with wrapped cells and empty debit/credit columns. It does not claim support for every bank PDF.
 
 ```sh
 python3 -m venv .venv-converter
