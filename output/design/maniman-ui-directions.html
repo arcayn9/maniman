@@ -1,0 +1,279 @@
+<div id="mm-directions" aria-label="Maniman design comparison">
+  <div class="viz-controls">
+    <label class="form-label">Preview size
+      <select id="mm-device" class="form-select" aria-label="Wireframe preview size">
+        <option value="desktop">Desktop</option>
+        <option value="mobile">Mobile</option>
+      </select>
+    </label>
+    <span class="text-small text-muted">Interactive wireframes · synthetic data · proposed roadmap screens</span>
+  </div>
+  <div class="viz-carousel" aria-label="Maniman design directions">
+    <section data-variant="Finance Workspace" aria-label="Finance Workspace, informed by UI UX Pro Max">
+      <div class="mm-frame mm-workspace" data-device="desktop" aria-label="Finance Workspace wireframe"></div>
+    </section>
+    <section data-variant="Quiet Ledger" aria-label="Quiet Ledger, informed by Impeccable" hidden>
+      <div class="mm-frame mm-ledger" data-device="desktop" aria-label="Quiet Ledger wireframe"></div>
+    </section>
+  </div>
+</div>
+<style>
+  #mm-directions { width:100%; }
+  #mm-directions .viz-controls { margin-bottom:16px; }
+  #mm-directions .mm-frame {
+    --mm-bg:light-dark(#f5f7fb,#111c2d); --mm-paper:light-dark(#ffffff,#19263a);
+    --mm-ink:light-dark(#182c48,#eef3fb); --mm-secondary:light-dark(#53647b,#b1c2d7);
+    --mm-line:light-dark(#dde4ee,#35445b); --mm-tint:light-dark(#edf2fa,#24354e);
+    --mm-accent:light-dark(#244fb4,#91b6ff); --mm-on-accent:light-dark(#ffffff,#122549);
+    --mm-warn:light-dark(#77551c,#efcd87); --mm-warnbg:light-dark(#fff5df,#3c321e);
+    --mm-success:light-dark(#246446,#9fd2b4); --mm-successbg:light-dark(#eaf5ee,#203d30);
+    --mm-gap:22px; min-height:760px; background:var(--mm-bg); color:var(--mm-ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:14px; line-height:1.5; border:1px solid var(--mm-line); box-sizing:border-box;
+    container-type:inline-size; width:100%; margin-inline:auto;
+  }
+  #mm-directions .mm-ledger {
+    --mm-bg:light-dark(#f3f6f1,#15211c); --mm-paper:light-dark(#ffffff,#1b2b23);
+    --mm-ink:light-dark(#233d31,#edf5ee); --mm-secondary:light-dark(#56675b,#b7c6b9);
+    --mm-line:light-dark(#dbe4d8,#354c3d); --mm-tint:light-dark(#e8f0e5,#273e2e);
+    --mm-accent:light-dark(#295e45,#afd6ba); --mm-on-accent:light-dark(#ffffff,#173822);
+    --mm-gap:28px;
+  }
+  #mm-directions .mm-frame[data-device="mobile"] { max-width:390px; }
+  #mm-directions .mm-frame *, #mm-directions .mm-frame *::before, #mm-directions .mm-frame *::after { box-sizing:border-box; }
+  #mm-directions .mm-frame button, #mm-directions .mm-frame input, #mm-directions .mm-frame select { font:inherit; }
+  #mm-directions .mm-frame h1, #mm-directions .mm-frame h2, #mm-directions .mm-frame h3, #mm-directions .mm-frame p { margin:0; }
+  #mm-directions .mm-frame h1 { font-size:24px; line-height:1.25; font-weight:650; letter-spacing:-.025em; }
+  #mm-directions .mm-frame h2 { font-size:16px; font-weight:650; line-height:1.4; }
+  #mm-directions .mm-frame h3 { font-size:14px; font-weight:650; }
+  #mm-directions .mm-frame small, #mm-directions .mm-small { font-size:12px; color:var(--mm-secondary); }
+  #mm-directions .mm-frame strong { font-weight:650; }
+  #mm-directions .mm-frame button { min-height:38px; padding:8px 12px; border:1px solid var(--mm-line); border-radius:6px; background:var(--mm-paper); color:var(--mm-ink); text-align:center; }
+  #mm-directions .mm-frame button:hover { background:var(--mm-tint); }
+  #mm-directions .mm-frame button:focus-visible, #mm-directions .mm-frame input:focus-visible, #mm-directions .mm-frame select:focus-visible { outline:3px solid var(--mm-accent); outline-offset:3px; }
+  #mm-directions .mm-frame .mm-primary { background:var(--mm-accent); color:var(--mm-on-accent); border-color:transparent; font-weight:600; }
+  #mm-directions .mm-frame .mm-primary:hover { filter:brightness(.94); }
+  #mm-directions .mm-frame .mm-plain { border-color:transparent; background:transparent; padding-inline:6px; color:var(--mm-accent); }
+  #mm-directions .mm-frame input, #mm-directions .mm-frame select { padding:9px 10px; background:var(--mm-paper); color:var(--mm-ink); border:1px solid var(--mm-line); border-radius:5px; min-width:0; width:100%; }
+  #mm-directions .mm-shell { display:grid; grid-template-columns:164px minmax(0,1fr); min-height:760px; }
+  #mm-directions .mm-sidebar { background:light-dark(#18315b,#12223c); color:#edf3ff; padding:25px 13px; display:flex; flex-direction:column; gap:30px; }
+  #mm-directions .mm-brand { font-size:19px; font-weight:700; letter-spacing:-.035em; white-space:nowrap; }
+  #mm-directions .mm-sidebar .mm-brand { padding-left:9px; }
+  #mm-directions .mm-nav { display:flex; gap:5px; flex-direction:column; }
+  #mm-directions .mm-nav button { display:flex; align-items:center; gap:10px; background:transparent; border:0; border-radius:5px; color:inherit; text-align:left; min-height:44px; padding:10px; }
+  #mm-directions .mm-sidebar .mm-nav button[aria-current="page"] { background:#305185; }
+  #mm-directions .mm-nav svg { width:17px; height:17px; flex:none; }
+  #mm-directions .mm-sidebar small { color:#cad8ef; }
+  #mm-directions .mm-side-footer { margin-top:auto; padding:12px 8px; display:grid; gap:8px; }
+  #mm-directions .mm-content { min-width:0; }
+  #mm-directions .mm-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:19px var(--mm-gap); border-bottom:1px solid var(--mm-line); background:var(--mm-paper); flex-wrap:wrap; }
+  #mm-directions .mm-toolbar .mm-toolbar-title { display:grid; gap:3px; }
+  #mm-directions .mm-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  #mm-directions .mm-main { padding:var(--mm-gap); display:grid; gap:22px; }
+  #mm-directions .mm-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); background:var(--mm-paper); border:1px solid var(--mm-line); border-radius:8px; }
+  #mm-directions .mm-metric { padding:17px 15px; min-width:0; }
+  #mm-directions .mm-metric + .mm-metric { border-left:1px solid var(--mm-line); }
+  #mm-directions .mm-value { display:block; font-size:25px; letter-spacing:-.025em; font-weight:650; font-variant-numeric:tabular-nums; margin:5px 0; white-space:nowrap; }
+  #mm-directions .mm-notice { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; padding:14px 16px; color:var(--mm-warn); background:var(--mm-warnbg); border-radius:6px; }
+  #mm-directions .mm-notice small { color:inherit; }
+  #mm-directions .mm-panel { background:var(--mm-paper); border:1px solid var(--mm-line); border-radius:8px; padding:18px; min-width:0; }
+  #mm-directions .mm-panel-header { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:17px; flex-wrap:wrap; }
+  #mm-directions .mm-split { display:grid; grid-template-columns:1.1fr 1fr; gap:18px; }
+  #mm-directions .mm-stack { display:grid; gap:14px; }
+  #mm-directions .mm-allocation { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:5px 12px; align-items:center; }
+  #mm-directions .mm-allocation b { font-variant-numeric:tabular-nums; font-weight:550; }
+  #mm-directions .mm-bar { grid-column:1/-1; height:6px; background:var(--mm-tint); border-radius:2px; overflow:hidden; margin-bottom:7px; }
+  #mm-directions .mm-bar span { display:block; height:100%; background:var(--mm-accent); }
+  #mm-directions .mm-baseline { display:grid; gap:12px; }
+  #mm-directions .mm-baseline-row, #mm-directions .mm-line { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  #mm-directions .mm-baseline-row b, #mm-directions .mm-money { font-variant-numeric:tabular-nums; white-space:nowrap; font-weight:600; }
+  #mm-directions .mm-divider { border:0; border-top:1px solid var(--mm-line); margin:10px 0; }
+  #mm-directions .mm-table { width:100%; border-collapse:collapse; font-size:13px; }
+  #mm-directions .mm-table th { text-align:left; color:var(--mm-secondary); font-weight:500; padding:0 8px 11px; }
+  #mm-directions .mm-table td { padding:13px 8px; border-top:1px solid var(--mm-line); vertical-align:middle; overflow-wrap:anywhere; }
+  #mm-directions .mm-table th:first-child, #mm-directions .mm-table td:first-child { padding-left:0; }
+  #mm-directions .mm-table th:last-child, #mm-directions .mm-table td:last-child { padding-right:0; text-align:right; }
+  #mm-directions .mm-table td small { display:block; }
+  #mm-directions .mm-table button { border:0; background:transparent; padding:3px 0; min-height:32px; text-align:left; color:var(--mm-accent); }
+  #mm-directions .mm-chip { display:inline-block; font-size:12px; padding:3px 7px; background:var(--mm-tint); border-radius:4px; white-space:nowrap; }
+  #mm-directions .mm-chip-warning { color:var(--mm-warn); background:var(--mm-warnbg); }
+  #mm-directions .mm-chip-success { color:var(--mm-success); background:var(--mm-successbg); }
+  #mm-directions .mm-review-grid { display:grid; grid-template-columns:minmax(190px,.8fr) minmax(0,1.2fr); gap:18px; align-items:start; }
+  #mm-directions .mm-queue { display:grid; gap:0; }
+  #mm-directions .mm-queue button { text-align:left; padding:16px 13px; display:grid; gap:5px; border-radius:0; border-width:0 0 1px; }
+  #mm-directions .mm-queue button[aria-current="true"] { background:var(--mm-tint); }
+  #mm-directions .mm-evidence { padding:13px 0; border-top:1px solid var(--mm-line); display:grid; gap:5px; }
+  #mm-directions .mm-evidence:first-child { border-top:0; }
+  #mm-directions .mm-form { display:grid; gap:14px; }
+  #mm-directions .mm-form label { display:grid; gap:6px; }
+  #mm-directions .mm-feedback { color:var(--mm-success); min-height:21px; }
+  #mm-directions .mm-topnav { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; padding:20px 28px; border-bottom:1px solid var(--mm-line); background:var(--mm-paper); }
+  #mm-directions .mm-topnav .mm-nav { flex-direction:row; gap:8px; color:var(--mm-secondary); flex-wrap:wrap; }
+  #mm-directions .mm-topnav .mm-nav button { padding:8px 10px; min-height:40px; }
+  #mm-directions .mm-topnav .mm-nav button[aria-current="page"] { color:var(--mm-accent); background:var(--mm-tint); }
+  #mm-directions .mm-ledger-body { padding:28px 34px; display:grid; gap:28px; }
+  #mm-directions .mm-ledger-heading { display:flex; align-items:start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  #mm-directions .mm-ledger-heading p { margin-top:8px; color:var(--mm-secondary); }
+  #mm-directions .mm-ledger-layout { display:grid; grid-template-columns:minmax(0,1.8fr) minmax(180px,1fr); gap:32px; }
+  #mm-directions .mm-task { background:var(--mm-tint); padding:23px; border-radius:8px; display:grid; gap:16px; }
+  #mm-directions .mm-task h2 { font-size:21px; font-weight:600; letter-spacing:-.02em; }
+  #mm-directions .mm-task p { color:var(--mm-secondary); }
+  #mm-directions .mm-task .mm-primary { justify-self:start; }
+  #mm-directions .mm-ledger-summary { padding-top:24px; display:grid; gap:15px; }
+  #mm-directions .mm-ledger-summary .mm-line { padding:0 0 14px; border-bottom:1px solid var(--mm-line); }
+  #mm-directions .mm-ledger-summary .mm-money { font-size:21px; }
+  #mm-directions .mm-subsection { display:grid; gap:15px; }
+  #mm-directions .mm-record { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px 12px; padding:15px 0; border-bottom:1px solid var(--mm-line); }
+  #mm-directions .mm-record button { background:transparent; border:0; padding:0; color:var(--mm-accent); min-height:24px; text-align:left; }
+  #mm-directions .mm-record .mm-money { text-align:right; }
+  #mm-directions .mm-record small { grid-column:1/-1; }
+  #mm-directions .mm-coverage { display:grid; gap:10px; padding-top:22px; margin-top:22px; border-top:1px solid var(--mm-line); }
+  #mm-directions .mm-review-focus { max-width:660px; margin-inline:auto; width:100%; display:grid; gap:23px; }
+  #mm-directions .mm-review-count { display:flex; justify-content:space-between; gap:16px; color:var(--mm-secondary); }
+  #mm-directions .mm-focus-amount { font-size:30px; font-weight:600; font-variant-numeric:tabular-nums; }
+  #mm-directions .mm-bottomnav { display:none; }
+  #mm-directions .mm-footnote { font-size:12px; color:var(--mm-secondary); }
+  #mm-directions .mm-import { display:grid; gap:22px; max-width:660px; margin-inline:auto; padding-block:18px; }
+  #mm-directions .mm-step { padding:15px 0; border-bottom:1px solid var(--mm-line); display:flex; gap:14px; align-items:start; }
+  #mm-directions .mm-step strong { flex:none; }
+  #mm-directions .mm-frame[data-density="compact"] { --mm-gap:16px; }
+  #mm-directions .mm-frame[data-density="compact"] .mm-ledger-body { padding:20px; gap:20px; }
+  @container (max-width:680px) {
+    #mm-directions .mm-shell { grid-template-columns:1fr; }
+    #mm-directions .mm-sidebar { display:none; }
+    #mm-directions .mm-main { padding:18px; gap:18px; }
+    #mm-directions .mm-toolbar { padding:20px 18px; }
+    #mm-directions .mm-toolbar h1 { font-size:21px; }
+    #mm-directions .mm-split, #mm-directions .mm-review-grid, #mm-directions .mm-ledger-layout { grid-template-columns:1fr; }
+    #mm-directions .mm-metrics { grid-template-columns:1fr; }
+    #mm-directions .mm-metric { display:grid; grid-template-columns:1fr auto; align-items:center; gap:3px 10px; padding:13px; }
+    #mm-directions .mm-metric + .mm-metric { border-left:0; border-top:1px solid var(--mm-line); }
+    #mm-directions .mm-metric .mm-value { grid-column:2; grid-row:1/3; font-size:22px; margin:0; }
+    #mm-directions .mm-hide-small { display:none; }
+    #mm-directions .mm-bottomnav { display:flex; justify-content:space-around; padding:9px 6px; border-top:1px solid var(--mm-line); background:var(--mm-paper); margin-top:12px; gap:3px; flex-wrap:wrap; }
+    #mm-directions .mm-bottomnav button { display:grid; justify-items:center; gap:4px; border:0; font-size:12px; min-height:49px; padding:6px 9px; }
+    #mm-directions .mm-bottomnav button[aria-current="page"] { color:var(--mm-accent); background:var(--mm-tint); }
+    #mm-directions .mm-bottomnav svg { width:18px; height:18px; }
+    #mm-directions .mm-topnav { padding:18px; }
+    #mm-directions .mm-topnav .mm-nav { display:none; }
+    #mm-directions .mm-ledger-body { padding:23px 20px; gap:24px; }
+    #mm-directions .mm-ledger-heading h1 { font-size:23px; }
+    #mm-directions .mm-ledger-layout { gap:26px; }
+    #mm-directions .mm-task { padding:20px; }
+    #mm-directions .mm-table { font-size:13px; }
+    #mm-directions .mm-table td { padding:13px 6px; }
+    #mm-directions .mm-panel { padding:15px; }
+    #mm-directions .mm-queue { grid-template-columns:1fr; }
+    #mm-directions .mm-queue button { min-height:44px; }
+    #mm-directions .mm-frame button { min-height:44px; }
+    #mm-directions .mm-frame input, #mm-directions .mm-frame select { font-size:16px; }
+    #mm-directions .mm-task .mm-primary { justify-self:stretch; }
+  }
+</style>
+<script>
+(() => {
+  const root = document.getElementById('mm-directions');
+  const navigation = [['overview','Overview','layout-dashboard'],['transactions','Transactions','list'],['review','Review','list-checks'],['accounts','Accounts','wallet']];
+  const transactions = [
+    {name:'Fresh Mart',date:'20 Nov',account:'ICICI savings · UPI',amount:'₹1,280',purpose:'Groceries',priority:'Essential'},
+    {name:'City Power',date:'19 Nov',account:'ICICI savings · NEFT',amount:'₹1,780',purpose:'Bills',priority:'Essential'},
+    {name:'Corner Café',date:'18 Nov',account:'HDFC credit card',amount:'₹640',purpose:'Food',priority:'Good-to-have'},
+    {name:'Monthly rent',date:'02 Nov',account:'ICICI savings · IMPS',amount:'₹22,000',purpose:'Rent',priority:'Non-negotiable'}
+  ];
+  const priorities = [['Non-negotiable','₹23,000',54],['Essential','₹13,180',31],['Good-to-have','₹4,500',10.5],['Luxury','₹2,000',4.5]];
+  const review = [
+    {name:'Fresh Mart',amount:'₹1,280',type:'Possible duplicate',question:'Do these records describe one payment?',sources:[['ICICI statement','UPI debit · 20 Nov · ref 913204'],['GPay statement','UPI payment · 20 Nov · ref 913204']],primary:'Count once',secondary:'Keep separate',note:'Two sources can support one transaction. Both source records stay attached.'},
+    {name:'Credit card payment',amount:'₹12,000',type:'Possible self-transfer',question:'Is this a payment between your own accounts?',sources:[['ICICI savings','Debit · 19 Nov'],['HDFC credit card','Payment received · 19 Nov']],primary:'Mark as transfer',secondary:'Keep as expense',note:'A card settlement moves money. The original card purchases remain the expenses.'},
+    {name:'Corner Café',amount:'₹640',type:'Priority needed',question:'How does this purchase fit your priorities?',sources:[['Purpose','Food'],['Payment source','HDFC credit card · 18 Nov']],primary:'Save priority',secondary:'Leave unassigned',note:'Your choice applies to this transaction. A reusable rule is an explicit next step.'}
+  ];
+  const states = {workspace:{view:'overview',index:0,resolved:new Set(),message:'',detail:-1,adding:false,accounts:[],edits:{}},ledger:{view:'overview',index:0,resolved:new Set(),message:'',detail:-1,adding:false,accounts:[],edits:{}}};
+  const saved = globalThis.openai?.widgetState?.privateContent;
+  const controls = {device:saved?.device === 'mobile' ? 'mobile' : 'desktop',density:'comfortable'};
+  const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const icon = name => '<i data-lucide="'+name+'" aria-hidden="true"></i>';
+  const count = state => review.length-state.resolved.size;
+  const button = (label,action,primary=false,extra='') => '<button type="button" class="'+(primary?'mm-primary':'')+'" data-action="'+action+'" '+extra+'>'+label+'</button>';
+  function nav(state,bottom=false) {
+    return '<nav class="'+(bottom?'mm-bottomnav':'mm-nav')+'" aria-label="'+(bottom?'Mobile navigation':'Main navigation')+'">'+navigation.map(([id,label,glyph])=>'<button type="button" data-action="navigate" data-view="'+id+'" '+(state.view===id?'aria-current="page"':'')+'>'+icon(glyph)+'<span>'+label+(id==='review'?' '+count(state):'')+'</span></button>').join('')+'</nav>';
+  }
+  const bars = () => priorities.map(([label,amount,width])=>'<div class="mm-allocation"><span>'+label+'</span><b>'+amount+'</b><div class="mm-bar"><span style="width:'+width+'%"></span></div></div>').join('');
+  const coverage = () => '<div class="mm-coverage"><h3>Statement coverage</h3><div class="mm-line"><span>ICICI savings</span><span class="mm-chip mm-chip-success">Covered</span></div><div class="mm-line"><span>HDFC card</span><span class="mm-chip mm-chip-success">Covered</span></div><div class="mm-line"><span>Pluxee wallet</span><span class="mm-chip mm-chip-warning">Missing</span></div><small>Missing coverage can change your totals.</small></div>';
+  const transactionFor = (state,index) => ({...transactions[index],...(state.edits[index] || {})});
+  function transactionTable(state,compact=false) {
+    return '<table class="mm-table"><thead><tr><th>Transaction</th><th class="mm-hide-small">Purpose</th><th class="mm-hide-small">Priority</th><th>Amount</th></tr></thead><tbody>'+transactions.slice(0,compact?3:4).map((original,index)=>{ const tx=transactionFor(state,index); return '<tr><td><button type="button" data-action="detail" data-index="'+index+'">'+escape(tx.name)+'</button><small>'+tx.date+' · '+tx.account+'</small></td><td class="mm-hide-small">'+escape(tx.purpose)+'</td><td class="mm-hide-small">'+escape(tx.priority)+'</td><td class="mm-money">'+tx.amount+'</td></tr>'; }).join('')+'</tbody></table>';
+  }
+  function detail(state) {
+    if(state.detail<0) return '';
+    const tx=transactionFor(state,state.detail);
+    return '<section class="mm-panel mm-form" aria-label="Transaction details"><div class="mm-panel-header"><h2>'+escape(tx.name)+'</h2>'+button('Close','close-detail')+'</div><div class="mm-line"><span>'+tx.account+'</span><strong>'+tx.amount+'</strong></div><label>Purpose<select data-purpose><option>'+escape(tx.purpose)+'</option><option>Services</option><option>Recreation</option></select></label><label>Priority<select data-priority>'+['Non-negotiable','Essential','Good-to-have','Luxury'].map(item=>'<option '+(item===tx.priority?'selected':'')+'>'+item+'</option>').join('')+'</select></label><label>Short description<input value="'+escape(tx.name)+'" aria-label="Short description"></label><small>Statement evidence stays attached to this transaction.</small>'+button('Save sample changes','save-detail',true)+'</section>';
+  }
+  function overviewA(state) {
+    return '<div class="mm-metrics"><div class="mm-metric"><span>Recorded spend</span><strong class="mm-value">₹42,680</strong><small>Through 20 Nov · provisional</small></div><div class="mm-metric"><span>Monthly baseline</span><strong class="mm-value">₹48,000</strong><small>Full-month plan</small></div><div class="mm-metric"><span>Card-funded spend</span><strong class="mm-value">₹15,200</strong><small>Funding is not causation</small></div></div>'+
+      '<div class="mm-notice"><div><strong>'+count(state)+' items need review</strong><br><small>Duplicates, transfers and missing priorities</small></div>'+button('Open review','open-review',true)+'</div>'+
+      '<div class="mm-split"><section class="mm-panel"><div class="mm-panel-header"><h2>Spending by priority</h2><small>User-defined</small></div>'+bars()+'</section><section class="mm-panel"><div class="mm-panel-header"><h2>Baseline vs actual</h2></div><div class="mm-baseline"><div class="mm-baseline-row"><span>Recorded so far</span><b>₹42,680</b></div><div class="mm-bar"><span style="width:88.92%"></span></div><div class="mm-baseline-row"><span>Full-month baseline</span><b>₹48,000</b></div><small>Current spending is ₹5,320 below the monthly plan. This is a partial-month comparison.</small></div>'+coverage()+'</section></div>'+
+      '<section class="mm-panel"><div class="mm-panel-header"><h2>Recent transactions</h2>'+button('View ledger','transactions')+'</div>'+transactionTable(state,true)+'</section>';
+  }
+  function overviewB(state) {
+    return '<div class="mm-ledger-heading"><div><h1>Your month, in order.</h1><p>November 2026 · through 20 Nov</p></div>'+button('Import statement','import')+'</div>'+
+      '<div class="mm-ledger-layout"><div><section class="mm-task"><h2>'+(count(state)?count(state)+' small decisions. Clearer records.':'Your sample review is complete.')+'</h2><p>'+(count(state)?'Check a duplicate payment, a card settlement and a transaction priority.':'All sample decisions are recorded with their original evidence.')+'</p><div class="mm-line"><span>'+(count(state)?'Up next: '+review[[0,1,2].find(i=>!state.resolved.has(i))].name:'No more sample decisions')+'</span><span class="mm-chip">Review</span></div>'+button(count(state)?'Review next transaction':'View completed review','open-review',true)+'</section>'+
+      '<section class="mm-ledger-summary" aria-label="Monthly spending"><div class="mm-line"><div>Recorded spend<br><small>Provisional · one source missing</small></div><span class="mm-money">₹42,680</span></div><div class="mm-line"><div>Monthly baseline<br><small>Full-month plan</small></div><span class="mm-money">₹48,000</span></div><div class="mm-line"><div>Card-funded<br><small>Review influence separately</small></div><span class="mm-money">₹15,200</span></div></section>'+
+      '<section class="mm-subsection" style="margin-top:24px"><div class="mm-line"><h2>Latest activity</h2>'+button('All transactions','transactions')+'</div>'+transactions.slice(0,3).map((tx,index)=>'<div class="mm-record"><button type="button" data-action="detail" data-index="'+index+'">'+escape(tx.name)+'</button><span class="mm-money">'+tx.amount+'</span><small>'+tx.date+' · '+escape(tx.purpose)+' · '+escape(tx.priority)+'</small></div>').join('')+'</section></div>'+
+      '<aside class="mm-subsection" style="align-content:start"><h2>Where your money goes</h2>'+bars()+coverage()+'</aside></div>';
+  }
+  function evidence(item) {return item.sources.map(([name,description])=>'<div class="mm-evidence"><strong>'+name+'</strong><span>'+description+'</span></div>').join('');}
+  function reviewContent(state,isQuiet) {
+    const pending=[0,1,2].filter(i=>!state.resolved.has(i));
+    if(!pending.length) return '<section class="mm-review-focus"><h1>Review complete</h1><p>All three sample decisions are recorded. Source evidence stays available.</p>'+button('Back to overview','overview',true)+button('Reset sample review','reset-review')+'</section>';
+    if(state.resolved.has(state.index)) state.index=pending[0];
+    const item=review[state.index];
+    const choice=item.type==='Priority needed'?'<label>Transaction priority<select data-review-priority><option>Good-to-have</option><option>Essential</option><option>Non-negotiable</option><option>Luxury</option></select></label>':'';
+    const content='<div class="mm-review-count"><span>'+item.type+'</span><span>'+count(state)+' remaining</span></div><div><h2>'+item.name+'</h2><div class="mm-focus-amount">'+item.amount+'</div></div><h2>'+item.question+'</h2><div>'+evidence(item)+'</div>'+choice+'<p class="mm-small">'+item.note+'</p><div class="mm-actions">'+button(item.primary,'resolve',true)+button(item.secondary,'resolve-alternate')+'</div><p class="mm-feedback" aria-live="polite">'+escape(state.message)+'</p>';
+    if(isQuiet) return '<section class="mm-review-focus mm-form">'+button('Back to overview','overview')+content+'</section>';
+    return '<div class="mm-review-grid"><section class="mm-panel"><div class="mm-panel-header"><h2>Review queue</h2><small>'+count(state)+' items</small></div><div class="mm-queue">'+pending.map(index=>'<button type="button" data-action="select-review" data-index="'+index+'" '+(state.index===index?'aria-current="true"':'')+'><strong>'+review[index].name+'</strong><span>'+review[index].amount+'</span><small>'+review[index].type+'</small></button>').join('')+'</div></section><section class="mm-panel mm-form">'+content+'</section></div>';
+  }
+  function accounts(state) {
+    return '<section class="mm-panel"><div class="mm-panel-header"><h2>Your accounts</h2>'+button('Add account','add-account',true)+'</div><table class="mm-table"><thead><tr><th>Alias / institution</th><th>Kind</th><th>Coverage</th></tr></thead><tbody><tr><td>Everyday account<small>ICICI · ending 1234</small></td><td>Savings</td><td>Through 20 Nov</td></tr><tr><td>Credit card<small>HDFC · ending 5678</small></td><td>Credit card</td><td>Through 20 Nov</td></tr><tr><td>Meal wallet<small>Pluxee</small></td><td>Wallet</td><td>Missing</td></tr>'+state.accounts.map(account=>'<tr><td>'+escape(account.alias)+'<small>'+escape(account.bank)+'</small></td><td>Account</td><td>Not imported</td></tr>').join('')+'</tbody></table><hr class="mm-divider"><div class="mm-line"><span>Confirmed payment relationship</span><span class="mm-chip">Editable in app</span></div><p class="mm-small">GPay uses Everyday account. Card settlements move from Everyday account to Credit card.</p></section>'+(state.adding?'<form class="mm-panel mm-form" data-account-form><h2>Add an account</h2><label>Account alias<input name="alias" required placeholder="e.g. Main savings" maxlength="60"></label><label>Institution<input name="institution" required placeholder="Bank or wallet" maxlength="60"></label><div class="mm-actions"><button type="submit" class="mm-primary">Add sample account</button>'+button('Cancel','cancel-account')+'</div></form>':'');
+  }
+  function importing() {return '<section class="mm-import"><h1>Import a statement</h1><div class="mm-step"><strong>1</strong><div><h2>Convert your PDF locally</h2><p class="mm-small">The converter extracts account details, statement coverage and transactions into JSON.</p></div></div><div class="mm-step"><strong>2</strong><div><h2>Choose the statement JSON</h2><p class="mm-small">Maniman reads the file on your device. Bank and account matches are shown for confirmation.</p></div></div><div class="mm-step"><strong>3</strong><div><h2>Review, then save</h2><p class="mm-small">Resolve ambiguous records before adding them to your encrypted ledger.</p></div></div>'+button('Preview sample JSON','sample-import',true)+'<small>Wireframe demonstration only. This does not read or upload any file.</small></section>';}
+  function render(key) {
+    const state=states[key]; const quiet=key==='ledger';
+    const frame=root.querySelector(quiet?'.mm-ledger':'.mm-workspace');
+    let content=state.view==='overview'?(quiet?overviewB(state):overviewA(state)):state.view==='review'?reviewContent(state,quiet):state.view==='accounts'?accounts(state):state.view==='import'?importing():'<section class="mm-panel"><div class="mm-panel-header"><h2>Transaction ledger</h2><small>All sample transactions · no date limit</small></div>'+transactionTable(state)+'</section>'+detail(state)+(state.message?'<p class="mm-feedback" aria-live="polite">'+escape(state.message)+'</p>':'');
+    if(quiet) frame.innerHTML='<div class="mm-topnav"><div class="mm-brand">Maniman</div>'+nav(state)+'<small>Local vault</small></div><main class="mm-ledger-body">'+(state.view==='overview'?'':'<div class="mm-ledger-heading"><h1>'+({transactions:'Your transactions',review:'Make each record count',accounts:'Accounts & relationships',import:'Statements'}[state.view])+'</h1><small>November 2026 · sample</small></div>')+content+'</main>'+nav(state,true);
+    else frame.innerHTML='<div class="mm-shell"><aside class="mm-sidebar"><div class="mm-brand">Maniman</div>'+nav(state)+'<div class="mm-side-footer"><small>Local encrypted vault</small><small>3 accounts · 2 sources covered</small><small>Sample data</small></div></aside><div class="mm-content"><header class="mm-toolbar"><div class="mm-toolbar-title"><h1>'+({overview:'Spending overview',transactions:'Transactions',review:'Review workspace',accounts:'Accounts',import:'Statements'}[state.view])+'</h1><small>November 2026 · through 20 Nov</small></div><div class="mm-actions">'+button('Import statement','import',true)+'</div></header><main class="mm-main">'+content+'</main>'+nav(state,true)+'</div></div>';
+    frame.dataset.device=controls.device; frame.dataset.density=controls.density;
+    frame.dataset.variant=key;
+    if(globalThis.lucide?.createIcons) globalThis.lucide.createIcons({attrs:{width:17,height:17}});
+  }
+  function saveView() {
+    if(globalThis.openai?.setWidgetState) globalThis.openai.setWidgetState({modelContent:{wireframeDevice:controls.device},privateContent:{device:controls.device}}).catch(()=>{});
+  }
+  root.addEventListener('click',event=>{
+    const control=event.target.closest('[data-action]'); if(!control) return;
+    const frame=control.closest('.mm-frame'); if(!frame) return;
+    const key=frame.dataset.variant; const state=states[key]; const action=control.dataset.action;
+    if(action==='navigate') state.view=control.dataset.view;
+    else if(['overview','transactions','import'].includes(action)) state.view=action;
+    else if(action==='open-review'||action==='sample-import'){state.view='review';state.index=[0,1,2].find(index=>!state.resolved.has(index))||0;state.message='';}
+    else if(action==='detail'){state.view='transactions';state.detail=Number(control.dataset.index);}
+    else if(action==='close-detail'||action==='save-detail'){if(action==='save-detail'){state.edits[state.detail]={name:frame.querySelector('input[aria-label="Short description"]').value,purpose:frame.querySelector('[data-purpose]').value,priority:frame.querySelector('[data-priority]').value};}state.detail=-1;state.message=action==='save-detail'?'Sample changes saved.':'';}
+    else if(action==='select-review') state.index=Number(control.dataset.index);
+    else if(action==='resolve'||action==='resolve-alternate'){state.resolved.add(state.index);state.message='Sample decision saved. Original evidence retained.';state.index=[0,1,2].find(index=>!state.resolved.has(index))||0;}
+    else if(action==='reset-review'){state.resolved.clear();state.index=0;state.message='';}
+    else if(action==='add-account') state.adding=true;
+    else if(action==='cancel-account') state.adding=false;
+    render(key);
+  });
+  root.addEventListener('submit',event=>{
+    if(!event.target.matches('[data-account-form]')) return;
+    event.preventDefault();
+    const frame=event.target.closest('.mm-frame'); const state=states[frame.dataset.variant];
+    state.accounts.push({alias:event.target.elements.alias.value,bank:event.target.elements.institution.value});
+    state.adding=false; render(frame.dataset.variant);
+  });
+  const size=root.querySelector('#mm-device'); size.value=controls.device;
+  size.addEventListener('change',()=>{controls.device=size.value;root.querySelectorAll('.mm-frame').forEach(frame=>frame.dataset.device=controls.device);saveView();});
+  render('workspace'); render('ledger');
+  if(globalThis.Tweak){const tweak=new Tweak({container:root,onChange:()=>{root.querySelectorAll('.mm-frame').forEach(frame=>frame.dataset.density=controls.density);}});tweak.addSelect(controls,'density',{label:'Information spacing',options:[{label:'Comfortable',value:'comfortable'},{label:'Compact',value:'compact'}]});}
+})();
+</script>

@@ -1,2 +1,10 @@
 config.js
 project_docs
+.venv-converter/
+__pycache__/
+*.py[cod]
+.DS_Store
+private-statements/
+tmp/
+data/*.vault.json
+data/*.vault.json.tmp

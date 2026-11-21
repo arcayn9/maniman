@@ -1,0 +1,9 @@
+Bank: Example Bank
+Account: 999999991234
+Account Type: savings
+Currency: INR
+Statement Period: 01/10/2026 to 31/10/2026
+
+Date | Description | Debit | Credit | Balance | Reference
+05/10/2026 | UPI/EXAMPLE GROCER | 800.00 | - | 9,200.00 | SYNTHETIC-REF-001
+06/10/2026 | SALARY | - | 20,000.00 | 29,200.00 | SYNTHETIC-REF-002

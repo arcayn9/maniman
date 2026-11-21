@@ -65,6 +65,13 @@ let editingTransactionId = null;
 let selectedActivityAccountId = "";
 let storageMode = "local";
 let syncStatus = "browser-only";
+let secureServerRevision = 0;
+let secureRemoteConflict = false;
+let secureInactivityTimer = null;
+let pendingStatementImport = null;
+let secureAuthEpoch = 0;
+let secureServerSyncQueue = Promise.resolve();
+let vaultOperationDepth = 0;
 
 const cloud = {
   configured: false,
@@ -78,7 +85,10 @@ const cloud = {
 
 const dom = {};
 
-document.addEventListener("DOMContentLoaded", init);
+document.addEventListener("DOMContentLoaded", () => init().catch((error) => {
+  const root = document.querySelector("#viewRoot");
+  if (root) root.textContent = `${error?.message || "Maniman could not open encrypted storage. Use HTTPS or localhost with Web Crypto and IndexedDB support."} Existing data has not been replaced.`;
+}));
 
 async function init() {
   dom.viewRoot = document.querySelector("#viewRoot");
@@ -95,6 +105,7 @@ async function init() {
 
   await initCloudClient();
   state = await loadState();
+  bindVaultControls();
   activeView = state.settings.lastView === "wallets" ? "accounts" : state.settings.lastView || "dashboard";
   selectedActivityAccountId = state.accounts[0]?.id || "";
 
@@ -108,6 +119,15 @@ async function init() {
     });
   });
 
+  document.querySelectorAll(".topbar [data-jump-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeView = button.dataset.jumpView;
+      state.settings.lastView = activeView;
+      saveState();
+      render();
+    });
+  });
+
   dom.monthPicker.addEventListener("change", (event) => {
     state.settings.selectedMonth = event.target.value || getCurrentMonth();
     saveState();
@@ -115,14 +135,10 @@ async function init() {
   });
 
   dom.currencySelect.addEventListener("change", (event) => {
-    state.settings.currency = event.target.value;
-    saveState();
-    render();
+    setDisplayCurrency(event.target.value);
   });
   dom.mobileCurrencySelect.addEventListener("change", (event) => {
-    state.settings.currency = event.target.value;
-    saveState();
-    render();
+    setDisplayCurrency(event.target.value);
   });
 
   dom.exportBtn.addEventListener("click", exportData);
@@ -134,65 +150,307 @@ async function init() {
   render();
 }
 
-async function loadState() {
-  const cloudState = await loadStateFromCloud();
-  if (cloudState) return cloudState;
+function emptyVaultState() {
+  const blank = createStarterState();
+  blank.settings.currency = "INR";
+  blank.accounts = [{ id: uid("account"), name: "Main account", categoryId: "acctcat_savings", openingBalance: 0, openingBalanceDate: "", balanceCheckpoints: [], color: "#0f766e", currency: "INR" }];
+  for (const collection of ["transactions", "budgets", "goals", "bills"]) blank[collection] = [];
+  return normalizeState(blank);
+}
 
-  const apiState = await loadStateFromApi();
-  if (apiState) return apiState;
+function currencyPolicyErrors(value) {
+  const currency = value.settings?.currency || "USD";
+  const errors = [];
+  try { window.ManimanStatement.currencyExponent(currency); }
+  catch (_) { return ["The vault currency is unsupported."]; }
+  if ((value.transactions || []).some((tx) => tx.currency && tx.currency !== currency)) errors.push("Transaction currencies must match the vault currency. This release does not convert or aggregate multiple currencies.");
+  if ((value.accounts || value.wallets || []).some((account) => account.currency && account.currency !== currency)) errors.push("Account currencies must match the vault currency. Use a separate vault for another currency in this release.");
+  if ((value.statementObservations || []).some((observation) => observation.data?.currency && observation.data.currency !== currency)) errors.push("Statement evidence contains a different currency from this vault.");
+  return errors;
+}
 
-  storageMode = "local";
-  syncStatus = "browser-only";
-  const raw = localStorage.getItem(STORAGE_KEY) || LEGACY_STORAGE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
-  if (!raw) return createStarterState();
-
-  try {
-    return normalizeState(JSON.parse(raw));
-  } catch (error) {
-    console.warn("Could not load saved state", error);
-    return createStarterState();
+function setDisplayCurrency(currency) {
+  if (!state || !window.ManimanSecureStorage?.isUnlocked()) return false;
+  try { window.ManimanStatement.currencyExponent(currency); }
+  catch (_) { showToast("Choose a supported vault currency."); return false; }
+  const previous = state.settings.currency;
+  const hasMoney = state.transactions.length || state.accounts.some((account) => Number(account.openingBalance || 0) !== 0 || (account.balanceCheckpoints || []).length)
+    || state.budgets.length || state.goals.length || state.bills.length || (state.statementObservations || []).length || (state.importBatches || []).length;
+  if (currency !== previous && hasMoney) {
+    showToast("Vault currency is fixed once financial data exists. Currency conversion is not available; use a separate vault for another currency.");
+    if (dom.currencySelect) dom.currencySelect.value = previous;
+    if (dom.mobileCurrencySelect) dom.mobileCurrencySelect.value = previous;
+    const settings = document.querySelector("#settingsCurrency");
+    if (settings) settings.value = previous;
+    return false;
   }
+  state.settings.currency = currency;
+  state.accounts.forEach((account) => { account.currency = currency; });
+  saveState();
+  render();
+  return true;
+}
+
+function captureVaultContext() {
+  return { ownerId: cloud.user?.id || null, namespace: window.ManimanSecureStorage.namespace(), epoch: secureAuthEpoch };
+}
+
+function vaultContextMatches(context, unlocked = true) {
+  return context.epoch === secureAuthEpoch && context.ownerId === (cloud.user?.id || null)
+    && context.namespace === window.ManimanSecureStorage.namespace()
+    && (!unlocked || window.ManimanSecureStorage.isUnlocked());
+}
+
+function validateBackupState(value) {
+  const errors = [];
+  const record = (item) => item !== null && typeof item === "object" && !Array.isArray(item);
+  const string = (item) => typeof item === "string" && item.length <= 16000;
+  const id = (item) => typeof item === "string" && item.length > 0 && item.length <= 4096 && !["__proto__", "prototype", "constructor"].includes(item);
+  const token = (item) => typeof item === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(item) && !["__proto__", "prototype", "constructor"].includes(item);
+  const date = (item) => typeof item === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item) && !item.startsWith("0000") && Number.isFinite(Date.parse(`${item}T00:00:00Z`)) && new Date(`${item}T00:00:00Z`).toISOString().slice(0, 10) === item;
+  const month = (item) => typeof item === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(item);
+  const numeric = (item) => (typeof item === "number" || typeof item === "string" && item.trim() !== "") && Number.isFinite(Number(item));
+  const fail = (path) => errors.push(`${path}: unsupported backup value`);
+  const list = (item, path, visit, optional = true) => {
+    if (item === undefined && optional) return;
+    if (!Array.isArray(item) || item.length > 100000) { fail(path); return; }
+    item.forEach((entry, index) => visit(entry, `${path}[${index}]`));
+  };
+  const ids = (item, path, check = id) => list(item, path, (entry, at) => { if (!check(entry)) fail(at); }, false);
+  const optionalFields = (item, path, fields, check) => fields.forEach((field) => { if (item[field] !== undefined && item[field] !== null && !check(item[field])) fail(`${path}.${field}`); });
+  const colors = (item, path) => optionalFields(item, path, ["color"], (color) => typeof color === "string" && /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(color));
+  const issue = (item, path) => {
+    if (!record(item) || !id(item.code) || !string(item.message)) return fail(path);
+    if (item.severity !== undefined && !["info", "warning", "error"].includes(item.severity)) fail(`${path}.severity`);
+  };
+  const checkpoint = (item, path) => {
+    if (!record(item) || !date(item.date) || !numeric(item.balance)) return fail(path);
+    optionalFields(item, path, ["id", "importBatchId"], (entry) => entry === "" || token(entry));
+    optionalFields(item, path, ["note", "source"], string);
+    if (item.position !== undefined && !["start", "end"].includes(item.position)) fail(`${path}.position`);
+    if (item.statementOwned !== undefined && typeof item.statementOwned !== "boolean") fail(`${path}.statementOwned`);
+    if (item.statementBatchIds !== undefined) ids(item.statementBatchIds, `${path}.statementBatchIds`, token);
+  };
+  const period = (item, path) => {
+    if (!record(item) || !date(item.start) || !date(item.end) || item.start > item.end) fail(path);
+  };
+  if (!record(value) || value.format !== undefined || !Array.isArray(value.transactions) || !Array.isArray(value.accounts || value.wallets)) {
+    return { valid: false, errors: ["Choose a supported Maniman application backup."] };
+  }
+  if (value.version !== undefined && ![1, 2, 3, 4].includes(value.version)) fail("version");
+  if (value.settings !== undefined && !record(value.settings)) fail("settings");
+  if (record(value.settings)) {
+    optionalFields(value.settings, "settings", ["currency", "lastView"], string);
+    if (value.settings.lastView !== undefined && !["dashboard", "transactions", "imports", "budgets", "accounts", "stats", "goals", "bills", "settings", "guide", "wallets"].includes(value.settings.lastView)) fail("settings.lastView");
+    if (value.settings.selectedMonth !== undefined && !month(value.settings.selectedMonth)) fail("settings.selectedMonth");
+    optionalFields(value.settings, "settings", ["vaultAutoLockMinutes"], numeric);
+  }
+  const accountIds = new Set();
+  list(value.accounts || value.wallets, "accounts", (account, path) => {
+    if (!record(account)) return fail(path);
+    optionalFields(account, path, ["id"], token);
+    if (account.id && accountIds.has(account.id)) fail(`${path}.id`);
+    if (account.id) accountIds.add(account.id);
+    optionalFields(account, path, ["name", "categoryId", "institution", "kind", "maskedIdentifier", "currency", "type"], string);
+    optionalFields(account, path, ["categoryId"], token);
+    optionalFields(account, path, ["openingBalance"], numeric);
+    if (account.openingBalanceDate && !date(account.openingBalanceDate)) fail(`${path}.openingBalanceDate`);
+    colors(account, path);
+    list(account.balanceCheckpoints, `${path}.balanceCheckpoints`, checkpoint);
+  }, false);
+  const transactionIds = new Set();
+  list(value.transactions, "transactions", (tx, path) => {
+    if (!record(tx) || !numeric(tx.amount) || Math.abs(Number(tx.amount)) <= 0) return fail(path);
+    optionalFields(tx, path, ["id"], token);
+    if (tx.id && transactionIds.has(tx.id)) fail(`${path}.id`);
+    if (tx.id) transactionIds.add(tx.id);
+    optionalFields(tx, path, ["description", "category", "accountId", "walletId", "toAccountId", "note", "currency", "classificationStatus", "paymentRail", "importBatchId"], string);
+    optionalFields(tx, path, ["accountId", "walletId", "toAccountId", "billId", "importBatchId"], (entry) => entry === "" || token(entry));
+    if (tx.date !== undefined && !date(tx.date)) fail(`${path}.date`);
+    if (tx.type !== undefined && !["income", "expense", "transfer"].includes(tx.type)) fail(`${path}.type`);
+    if (tx.amountMinor !== undefined && tx.amountMinor !== null && !Number.isSafeInteger(tx.amountMinor)) fail(`${path}.amountMinor`);
+    if (tx.tags !== undefined && !(typeof tx.tags === "string" || Array.isArray(tx.tags) && tx.tags.every(string))) fail(`${path}.tags`);
+    if (tx.statementEvidence !== undefined) ids(tx.statementEvidence, `${path}.statementEvidence`);
+    if (tx.statementOrigin !== undefined && tx.statementOrigin !== null && (!record(tx.statementOrigin) || !token(tx.statementOrigin.importBatchId) || typeof tx.statementOrigin.snapshot !== "string" || tx.statementOrigin.snapshot.length > 128000)) fail(`${path}.statementOrigin`);
+  }, false);
+  for (const collection of ["accountCategories", "transactionCategories", "budgets", "goals", "bills"]) {
+    list(value[collection], collection, (item, path) => {
+      if (!record(item)) return fail(path);
+      optionalFields(item, path, ["id", "name", "category", "categoryId", "accountId", "walletId", "type", "kind"], string);
+      optionalFields(item, path, ["id", "categoryId", "accountId", "walletId"], token);
+      optionalFields(item, path, ["limit", "target", "saved", "amount", "dueDay"], numeric);
+      colors(item, path);
+      if (item.dueDate && !date(item.dueDate)) fail(`${path}.dueDate`);
+      if (item.keywords !== undefined && !(typeof item.keywords === "string" || Array.isArray(item.keywords) && item.keywords.every(string))) fail(`${path}.keywords`);
+      if (item.paidMonths !== undefined) list(item.paidMonths, `${path}.paidMonths`, (entry, at) => { if (!month(entry)) fail(at); }, false);
+    });
+  }
+  list(value.tags, "tags", (tag, path) => {
+    if (typeof tag === "string") return;
+    if (!record(tag)) return fail(path);
+    optionalFields(tag, path, ["id", "name"], string); optionalFields(tag, path, ["id"], token); colors(tag, path);
+    if (tag.keywords !== undefined && !(typeof tag.keywords === "string" || Array.isArray(tag.keywords) && tag.keywords.every(string))) fail(`${path}.keywords`);
+  });
+  list(value.statementMappings, "statementMappings", (mapping, path) => {
+    if (!record(mapping) || !id(mapping.key) || !token(mapping.accountId)) return fail(path);
+    optionalFields(mapping, path, ["confirmedAt"], string);
+    optionalFields(mapping, path, ["importBatchId"], token);
+  });
+  list(value.statementObservations, "statementObservations", (observation, path) => {
+    if (!record(observation)) return fail(path);
+    for (const field of ["id", "documentId", "statementId", "accountId", "transactionId", "importBatchId"]) if (!id(observation[field])) fail(`${path}.${field}`);
+    for (const field of ["accountId", "transactionId", "importBatchId"]) if (!token(observation[field])) fail(`${path}.${field}`);
+    const row = observation.data;
+    if (!record(row) || !id(row.observationId) || !date(row.transactionDate) || !string(row.description) || !Number.isSafeInteger(row.amountMinor) || row.amountMinor <= 0 || !["credit", "debit"].includes(row.direction)) return fail(`${path}.data`);
+    optionalFields(row, `${path}.data`, ["postingDate", "valueDate"], date);
+    try { window.ManimanStatement.currencyExponent(row.currency); } catch (_) { fail(`${path}.data.currency`); }
+    if (!record(row.sourceLocation) || !Number.isInteger(row.sourceLocation.page) || row.sourceLocation.page < 1) fail(`${path}.data.sourceLocation`);
+    list(row.references, `${path}.data.references`, (reference, at) => { if (!record(reference) || !id(reference.type) || !id(reference.value)) fail(at); }, false);
+    list(row.issues, `${path}.data.issues`, issue, false);
+  });
+  list(value.importBatches, "importBatches", (batch, path) => {
+    if (!record(batch) || !token(batch.id) || batch.kind !== "statement" || !string(batch.institution) || !string(batch.createdAt) || !Number.isFinite(Date.parse(batch.createdAt))) return fail(path);
+    optionalFields(batch, path, ["documentId"], id);
+    ids(batch.observationIds, `${path}.observationIds`);
+    for (const field of ["createdTransactionIds", "createdAccountIds", "checkpointIds"]) ids(batch[field], `${path}.${field}`, token);
+    if (!record(batch.transactionSnapshots) || !Object.values(batch.transactionSnapshots).every((snapshot) => typeof snapshot === "string" && snapshot.length <= 128000)) fail(`${path}.transactionSnapshots`);
+    list(batch.statements, `${path}.statements`, (section, at) => {
+      if (!record(section) || !id(section.statementId) || !token(section.accountId)) return fail(at);
+      period(section.period, `${at}.period`);
+      if (!record(section.account) || !record(section.extraction)) fail(at);
+    }, false);
+  });
+  if (!errors.length) errors.push(...currencyPolicyErrors(value));
+  return { valid: errors.length === 0, errors };
+}
+
+function prepareBackupState(value) {
+  const validation = validateBackupState(value);
+  if (!validation.valid) throw new Error(`Backup rejected before saving. ${validation.errors.slice(0, 3).join(" ")}`);
+  return normalizeState(value);
+}
+
+async function loadState() {
+  const secure = window.ManimanSecureStorage;
+  if (!secure || !window.ManimanVaultAccess) throw new Error("Encrypted storage is unavailable.");
+  const ownerId = cloud.user?.id || null;
+  const epoch = secureAuthEpoch;
+  const namespace = ownerId ? `user:${ownerId}` : "local";
+  await secure.begin(namespace);
+  const owner = { ownerId, epoch, namespace };
+  if (!vaultContextMatches(owner, false)) throw new Error("Vault owner changed while opening storage. Reload to unlock the active account.");
+  secureRemoteConflict = false;
+  const remote = ownerId ? await loadStateFromCloud() : await loadStateFromApi();
+  if (!vaultContextMatches(owner, false)) throw new Error("Vault owner changed while reading storage. Reload to unlock the active account.");
+  const encryptedRemote = window.ManimanVault.isEnvelope(remote) ? remote : null;
+  const recognizedLegacy = remote !== null && remote !== undefined && !remote.format && Array.isArray(remote.accounts || remote.wallets) && Array.isArray(remote.transactions);
+  if (remote !== null && remote !== undefined && !encryptedRemote && !recognizedLegacy) {
+    throw new Error("The existing remote vault is unreadable or uses an unsupported format. Preserve that copy and recover it before creating or syncing another vault.");
+  }
+  const localEnvelope = secure.getEnvelope();
+  if (localEnvelope && encryptedRemote && stableStatementStringify(localEnvelope) !== stableStatementStringify(encryptedRemote)) {
+    await secure.preserveConflict(encryptedRemote);
+    secureRemoteConflict = true;
+    syncStatus = "cloud-conflict";
+    cloud.lastError = "Another encrypted snapshot exists. Your local vault is preserved. Export both copies before resolving this conflict.";
+    cloud.conflictEnvelope = encryptedRemote;
+  }
+  const legacy = !localEnvelope && !encryptedRemote
+    ? (recognizedLegacy ? remote : (!ownerId ? loadCachedState() : null))
+    : null;
+  const initialState = legacy ? prepareBackupState(legacy) : emptyVaultState();
+  const opened = await window.ManimanVaultAccess.requestAccess({ initialState, remoteEnvelope: encryptedRemote, migration: !!legacy });
+  if (!vaultContextMatches(owner)) throw new Error("Vault owner changed while unlocking. Reload to open the active account.");
+  // Only remove browser plaintext after the encrypted copy and recovery exercise succeed.
+  if (legacy && !ownerId) {
+    for (const key of [STORAGE_KEY, ...LEGACY_STORAGE_KEYS]) localStorage.removeItem(key);
+  }
+  return prepareBackupState(opened);
 }
 
 async function loadStateFromApi() {
   if (location.protocol === "file:") return null;
-
+  let response;
   try {
-    const response = await fetch(`${API_STATE_URL}?ts=${Date.now()}`, { cache: "no-store" });
-    if (!response.ok) return null;
-    const payload = await response.json();
-    storageMode = "server";
-    syncStatus = "local-server";
-    return normalizeState(payload.state || payload || {});
-  } catch (error) {
-    return null;
-  }
+    response = await fetch(`${API_STATE_URL}?ts=${Date.now()}`, { cache: "no-store" });
+  } catch (_) { return null; }
+  if (response.status === 422) throw new Error("The encrypted local-server file is unreadable or unsupported. Preserve it and recover it before creating another vault.");
+  if (response.status >= 500) throw new Error("The local server could not read its storage. Do not assume the vault is empty; recover or reconnect before creating another copy.");
+  if (!response.ok) return null;
+  let payload;
+  try { payload = await response.json(); }
+  catch (_) { throw new Error("The local server returned unreadable storage data. No empty vault will replace it."); }
+  if (!payload || typeof payload !== "object" || !Object.prototype.hasOwnProperty.call(payload, "state")) throw new Error("The local server returned an unsupported storage response.");
+  storageMode = "server";
+  syncStatus = "encrypted-local";
+  secureServerRevision = window.ManimanVault.isEnvelope(payload.state) ? payload.state.revision : 0;
+  return payload.state;
+}
+
+async function syncEncryptedState() {
+  if (!window.ManimanSecureStorage?.isUnlocked() || secureRemoteConflict) return;
+  if (storageMode === "cloud" && cloud.user) return saveStateToCloud();
+  if (storageMode !== "server") return;
+  const owner = captureVaultContext();
+  const operation = secureServerSyncQueue.catch(() => {}).then(async () => {
+    if (!vaultContextMatches(owner) || secureRemoteConflict || storageMode !== "server") return;
+    try {
+      await window.ManimanSecureStorage.flush();
+      if (!vaultContextMatches(owner) || secureRemoteConflict || storageMode !== "server") return;
+      const envelope = window.ManimanSecureStorage.getEnvelope();
+      const response = await fetch(API_STATE_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: envelope, expectedRevision: secureServerRevision }) });
+      if (!vaultContextMatches(owner)) return;
+      if (!response.ok) {
+        if (response.status === 409) { secureRemoteConflict = true; syncStatus = "cloud-conflict"; }
+        else syncStatus = "unsynced";
+        throw new Error("Encrypted server save failed. The browser vault remains available.");
+      }
+      secureServerRevision = envelope.revision;
+      syncStatus = "encrypted-local";
+    } catch (_) {
+      if (vaultContextMatches(owner)) showToast("Encrypted server copy was not saved. Your encrypted browser vault is preserved; retry after reconnecting.");
+    }
+    if (vaultContextMatches(owner)) updateStorageBadge();
+  });
+  secureServerSyncQueue = operation;
+  return operation;
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  if (storageMode === "cloud" && cloud.user) {
-    saveStateToCloud();
-    return;
+  if (!state || !window.ManimanSecureStorage?.isUnlocked()) {
+    showToast("Unlock your vault before saving changes.");
+    return Promise.resolve(false);
   }
-
-  if (storageMode !== "server") {
-    syncStatus = "browser-only";
+  return window.ManimanSecureStorage.save(state).then(async () => {
+    await syncEncryptedState();
+    return true;
+  }).catch(() => {
+    syncStatus = "unsynced";
+    showToast("Encrypted save failed. Keep this tab open and retry; no plaintext fallback was written.");
     updateStorageBadge();
-    return;
-  }
-
-  fetch(API_STATE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ state })
-  }).catch((error) => {
-    console.warn("Server save failed", error);
-    storageMode = "local";
-    syncStatus = "browser-only";
-    updateStorageBadge();
-    showToast("Server save failed. Saved in this browser instead.");
+    return false;
   });
+}
+
+function bindVaultControls() {
+  const lock = async () => {
+    try { await window.ManimanSecureStorage.flush(); }
+    catch (_) { showToast("Save failed. Keep this tab open and retry before locking."); return; }
+    window.ManimanSecureStorage.lock();
+    window.dispatchEvent(new Event("maniman-vault-locked"));
+    state = null;
+    document.querySelector("#viewRoot")?.replaceChildren();
+    location.reload();
+  };
+  document.querySelector("#vaultLockBtn")?.addEventListener("click", lock);
+  document.querySelector("#mobileVaultLockBtn")?.addEventListener("click", lock);
+  const resetTimer = () => {
+    clearTimeout(secureInactivityTimer);
+    const minutes = Number(state?.settings?.vaultAutoLockMinutes || 15);
+    secureInactivityTimer = setTimeout(lock, Math.max(1, Math.min(120, minutes)) * 60000);
+  };
+  for (const event of ["pointerdown", "keydown"]) document.addEventListener(event, resetTimer, { passive: true });
+  resetTimer();
 }
 
 async function initCloudClient() {
@@ -207,58 +465,45 @@ async function initCloudClient() {
   const { data } = await cloud.client.auth.getSession();
   cloud.user = data?.session?.user || null;
 
-  cloud.client.auth.onAuthStateChange(async (_event, session) => {
+  cloud.client.auth.onAuthStateChange((_event, session) => {
+    const previousUser = cloud.user?.id || null;
     cloud.user = session?.user || null;
-    cloud.revision = null;
-    cloud.lastError = "";
-    if (!state) return;
-    if (cloud.user) {
-      const cloudState = await loadStateFromCloud();
-      if (cloudState) {
-        state = cloudState;
-        activeView = state.settings.lastView || "dashboard";
-        selectedActivityAccountId = state.accounts[0]?.id || "";
-      }
-    } else {
-      storageMode = "local";
-      syncStatus = "browser-only";
-    }
-    render();
+    if (previousUser === (cloud.user?.id || null)) return;
+    // Invalidate decrypted state immediately; queued work must never cross owners.
+    secureAuthEpoch += 1;
+    clearTimeout(secureInactivityTimer);
+    window.ManimanSecureStorage?.lock();
+    window.dispatchEvent(new Event("maniman-vault-locked"));
+    clearStatementImport();
+    state = null;
+    cloud.pendingSave = false;
+    document.querySelector("#viewRoot")?.replaceChildren();
+    const shell = document.querySelector(".shell");
+    if (shell) shell.inert = true;
+    // Auth callbacks must not await calls back into the auth client.
+    setTimeout(() => location.reload(), 0);
   });
 }
 
 async function loadStateFromCloud() {
   if (!cloud.client || !cloud.user) return null;
-
+  const ownerId = cloud.user.id;
+  const epoch = secureAuthEpoch;
+  storageMode = "cloud";
   try {
-    const { data, error } = await cloud.client
-      .from(SUPABASE_TABLE)
-      .select("state, revision")
-      .eq("user_id", cloud.user.id)
-      .maybeSingle();
-
+    const { data, error } = await cloud.client.from(SUPABASE_TABLE).select("state, revision").eq("user_id", ownerId).maybeSingle();
+    if (epoch !== secureAuthEpoch || ownerId !== cloud.user?.id) throw new Error("Vault owner changed.");
     if (error) throw error;
-
-    storageMode = "cloud";
-    syncStatus = "synced";
-    cloud.lastError = "";
-
-    if (!data) {
-      cloud.revision = 0;
-      const localState = loadCachedState() || createStarterState();
-      state = normalizeState(localState);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      await saveStateToCloud(true);
-      return state;
+    if (data && (data.state === null || data.state === undefined)) {
+      throw Object.assign(new Error("The existing cloud row has no readable vault. Preserve that row and recover it before creating another copy."), { preserveVault: true });
     }
-
-    cloud.revision = Number(data.revision || 0);
-    const nextState = normalizeState(data.state || {});
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
-    return nextState;
+    syncStatus = "synced";
+    cloud.revision = Number(data?.revision || 0);
+    return data?.state ?? null;
   } catch (error) {
-    console.warn("Cloud load failed", error);
-    cloud.lastError = error.message || "Cloud load failed";
+    if (epoch !== secureAuthEpoch || ownerId !== cloud.user?.id) throw new Error("Vault owner changed while reading cloud storage.");
+    if (error.preserveVault) throw error;
+    cloud.lastError = "Cloud is unavailable. The encrypted browser vault remains available; reconnect before syncing.";
     syncStatus = "cloud-unavailable";
     return null;
   }
@@ -267,78 +512,51 @@ async function loadStateFromCloud() {
 function loadCachedState() {
   const raw = localStorage.getItem(STORAGE_KEY) || LEGACY_STORAGE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
   if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    return null;
-  }
+  try { return JSON.parse(raw); }
+  catch (_) { throw new Error("Existing browser data is unreadable. Preserve that copy before creating a new vault."); }
 }
 
-async function saveStateToCloud(initialSave = false) {
-  if (!cloud.client || !cloud.user) return;
-  if (cloud.saving) {
-    cloud.pendingSave = true;
-    return;
-  }
-
+async function saveStateToCloud() {
+  if (!cloud.client || !cloud.user || secureRemoteConflict || !window.ManimanSecureStorage?.isUnlocked()) return;
+  const owner = captureVaultContext();
+  const client = cloud.client;
+  if (owner.namespace !== `user:${owner.ownerId}`) return;
+  if (cloud.saving) { cloud.pendingSave = true; return; }
   cloud.saving = true;
+  cloud.pendingSave = false;
   syncStatus = "syncing";
   updateStorageBadge();
-
   try {
+    await window.ManimanSecureStorage.flush();
+    if (!vaultContextMatches(owner)) return;
     const currentRevision = Number(cloud.revision || 0);
-    const nextRevision = currentRevision + 1;
-    const payload = {
-      user_id: cloud.user.id,
-      state,
-      revision: nextRevision,
-      updated_at: new Date().toISOString()
-    };
-
-    if (initialSave || currentRevision === 0) {
-      const { data, error } = await cloud.client
-        .from(SUPABASE_TABLE)
-        .upsert(payload)
-        .select("revision")
-        .single();
-      if (error) throw error;
-      cloud.revision = Number(data.revision || nextRevision);
-    } else {
-      const { data, error } = await cloud.client
-        .from(SUPABASE_TABLE)
-        .update(payload)
-        .eq("user_id", cloud.user.id)
-        .eq("revision", currentRevision)
-        .select("revision")
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) {
-        syncStatus = "cloud-conflict";
-        showToast("Cloud copy changed elsewhere. Refreshing before the next save.");
-        const refreshed = await loadStateFromCloud();
-        if (refreshed) {
-          state = refreshed;
-          render();
-        }
-        return;
-      }
-      cloud.revision = Number(data.revision || nextRevision);
+    const payload = { user_id: owner.ownerId, state: window.ManimanSecureStorage.getEnvelope(), revision: currentRevision + 1, updated_at: new Date().toISOString() };
+    const query = currentRevision === 0
+      ? client.from(SUPABASE_TABLE).insert(payload)
+      : client.from(SUPABASE_TABLE).update(payload).eq("user_id", owner.ownerId).eq("revision", currentRevision);
+    const { data, error } = await query.select("revision").maybeSingle();
+    if (!vaultContextMatches(owner)) return;
+    if (error && error.code !== "23505") throw new Error("Encrypted cloud save failed.");
+    if (error?.code === "23505" || !data) {
+      secureRemoteConflict = true;
+      syncStatus = "cloud-conflict";
+      cloud.lastError = "Cloud save was rejected or another device changed the vault. Local work is preserved; export it before resolving.";
+      showToast(cloud.lastError);
+      return;
     }
-
-    storageMode = "cloud";
+    cloud.revision = Number(data.revision);
     syncStatus = "synced";
     cloud.lastError = "";
-  } catch (error) {
-    console.warn("Cloud save failed", error);
-    cloud.lastError = error.message || "Cloud save failed";
+  } catch (_) {
+    if (!vaultContextMatches(owner)) return;
+    cloud.lastError = "Encrypted cloud save failed. Local encrypted changes are preserved.";
     syncStatus = "unsynced";
-    showToast("Cloud save failed. A local cache is still available.");
+    showToast(cloud.lastError);
   } finally {
     cloud.saving = false;
-    updateStorageBadge();
-    if (cloud.pendingSave) {
-      cloud.pendingSave = false;
-      saveStateToCloud();
+    if (vaultContextMatches(owner)) {
+      updateStorageBadge();
+      if (cloud.pendingSave && !secureRemoteConflict && syncStatus === "synced") { cloud.pendingSave = false; saveStateToCloud(); }
     }
   }
 }
@@ -371,11 +589,9 @@ async function signUpForCloud(email, password) {
 
 async function signOutOfCloud() {
   if (!cloud.client) return;
-  await cloud.client.auth.signOut();
-  storageMode = "local";
-  syncStatus = "browser-only";
-  showToast("Signed out. Saved in this browser.");
-  render();
+  await window.ManimanSecureStorage.flush();
+  const { error } = await cloud.client.auth.signOut();
+  if (error) showToast("Could not sign out. Your encrypted local vault is preserved.");
 }
 
 function normalizeState(value = {}) {
@@ -386,7 +602,7 @@ function normalizeState(value = {}) {
   const transactions = normalizeTransactions(value.transactions || starter.transactions, accounts);
 
   const next = {
-    version: 3,
+    version: 4,
     settings: { ...starter.settings, ...(value.settings || {}) },
     accountCategories,
     accounts,
@@ -395,9 +611,15 @@ function normalizeState(value = {}) {
     tags: normalizeTags(value.tags || starter.tags),
     budgets: Array.isArray(value.budgets) ? value.budgets : starter.budgets,
     goals: Array.isArray(value.goals) ? value.goals : starter.goals,
-    bills: Array.isArray(value.bills) ? value.bills : starter.bills
+    bills: Array.isArray(value.bills) ? value.bills : starter.bills,
+    statementObservations: Array.isArray(value.statementObservations) ? value.statementObservations : [],
+    importBatches: Array.isArray(value.importBatches) ? value.importBatches : [],
+    statementMappings: Array.isArray(value.statementMappings) ? value.statementMappings : []
   };
 
+  // Older saved records without currency used USD. New-state defaults must not
+  // silently relabel those amounts when the starter currency changes.
+  if (!value.settings?.currency && Object.keys(value).length) next.settings.currency = "USD";
   if (!next.settings.selectedMonth) next.settings.selectedMonth = getCurrentMonth();
   if (!next.settings.currency) next.settings.currency = "USD";
   if (next.settings.lastView === "wallets") next.settings.lastView = "accounts";
@@ -452,6 +674,10 @@ function normalizeAccounts(accounts, accountCategories) {
     return {
       id: account.id || uid("account"),
       name: account.name || "Account",
+      institution: typeof account.institution === "string" ? account.institution : "",
+      kind: typeof account.kind === "string" ? account.kind : "",
+      maskedIdentifier: typeof account.maskedIdentifier === "string" ? account.maskedIdentifier : "",
+      currency: typeof account.currency === "string" ? account.currency : "",
       categoryId: account.categoryId || inferAccountCategoryId(account.type || account.name, accountCategories) || defaultCategoryId,
       openingBalance,
       openingBalanceDate,
@@ -483,7 +709,9 @@ function normalizeBalanceCheckpoints(checkpoints) {
       position,
       source,
       note: checkpoint.note || "",
-      importBatchId: checkpoint.importBatchId || ""
+      importBatchId: checkpoint.importBatchId || "",
+      statementOwned: Boolean(checkpoint.statementOwned),
+      statementBatchIds: Array.isArray(checkpoint.statementBatchIds) ? checkpoint.statementBatchIds : []
     });
   });
   return Array.from(byKey.values()).sort(compareCheckpointsAsc);
@@ -505,7 +733,13 @@ function normalizeTransactions(transactions, accounts) {
       note: tx.note || "",
       tags: Array.isArray(tx.tags) ? tx.tags : normalizeTagInput(tx.tags || ""),
       billId: tx.billId || null,
-      importBatchId: tx.importBatchId || ""
+      importBatchId: tx.importBatchId || "",
+      currency: typeof tx.currency === "string" ? tx.currency : "",
+      amountMinor: Number.isSafeInteger(tx.amountMinor) ? tx.amountMinor : null,
+      statementEvidence: Array.isArray(tx.statementEvidence) ? tx.statementEvidence : [],
+      statementOrigin: tx.statementOrigin && typeof tx.statementOrigin === "object" ? tx.statementOrigin : null,
+      classificationStatus: tx.classificationStatus || "",
+      paymentRail: typeof tx.paymentRail === "string" ? tx.paymentRail : ""
     };
   }).filter((tx) => tx.amount > 0 && tx.accountId);
 }
@@ -558,7 +792,7 @@ function createStarterState() {
   return {
     version: 3,
     settings: {
-      currency: "USD",
+      currency: "INR",
       selectedMonth: month,
       lastView: "dashboard"
     },
@@ -600,7 +834,7 @@ function createBlankState() {
   return {
     ...starter,
     settings: {
-      currency: state?.settings?.currency || "USD",
+      currency: state?.settings?.currency || "INR",
       selectedMonth: getCurrentMonth(),
       lastView: "dashboard"
     },
@@ -616,17 +850,26 @@ function render() {
   dom.monthPicker.value = state.settings.selectedMonth;
   dom.currencySelect.value = state.settings.currency;
   dom.mobileCurrencySelect.value = state.settings.currency;
-  dom.navItems.forEach((item) => item.classList.toggle("is-active", item.dataset.view === activeView));
+  dom.navItems.forEach((item) => {
+    item.classList.toggle("is-active", item.dataset.view === activeView);
+    if (item.dataset.view === activeView) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  });
+  const screenTitle = document.querySelector("#screenTitle");
+  if (screenTitle) screenTitle.textContent = ({ dashboard: "Overview", transactions: "Transactions", imports: "Imports & review", accounts: "Accounts", budgets: "Budgets", stats: "Insights", goals: "Goals", bills: "Bills", settings: "Settings", guide: "User’s Guide" })[activeView] || "Overview";
+  document.querySelectorAll(".mobile-more-nav[open], .topbar-menu[open]").forEach((menu) => menu.removeAttribute("open"));
   updateStorageBadge();
 
   const renderer = {
     dashboard: renderDashboard,
     transactions: renderTransactions,
+    imports: renderImports,
     budgets: renderBudgets,
     accounts: renderAccounts,
     stats: renderStats,
     goals: renderGoals,
     bills: renderBills,
+    guide: renderGuide,
     settings: renderSettings
   }[activeView] || renderDashboard;
 
@@ -663,32 +906,35 @@ function renderDashboard() {
   const insights = getInsights(month);
 
   return `
-    ${pageHeader("Dashboard", monthLabel(month), "")}
-    <section class="quick-add-section">
-      <article class="card">
+    ${pageHeader("Your money, at a glance", `Recorded activity · ${monthLabel(month)}`, "")}
+    <section class="workspace-summary" aria-label="Monthly summary">
+      ${metricCard("Recorded spending", formatMoney(expense), "Transfers excluded")}
+      ${metricCard("Recorded income", formatMoney(income), "Transfers excluded")}
+      ${metricCard("Net cash flow", formatMoney(net), "Income minus spending")}
+    </section>
+    <div class="workspace-review-banner">
+      <div><strong>${pendingStatementImport ? "Statement ready for review" : "Keep your picture up to date"}</strong><p>${pendingStatementImport ? "Confirm account, period and transaction treatment before saving." : "Import statements, check overlaps and confirm how each payment is recorded."}</p></div>
+      <button class="button ghost" type="button" data-jump-view="imports">${pendingStatementImport ? "Continue review" : "Open imports"}</button>
+    </div>
+    <details class="workspace-quick-entry card">
+      <summary>Quick entry <span class="muted">Log a payment in your own words</span></summary>
+      <div>
         <div class="card-header">
           <h2 class="card-title">Quick add</h2>
           <span class="chip">Auto tags</span>
         </div>
         <form id="quickAddForm" class="quick-entry">
-          <textarea id="quickText" class="control" placeholder="coffee 4.50 cash yesterday&#10;salary 3000 main savings&#10;transfer 250 main savings to index fund"></textarea>
+          <textarea id="quickText" class="control" aria-label="Quick transaction entries" placeholder="coffee 4.50 cash yesterday&#10;salary 3000 main savings&#10;transfer 250 main savings to index fund"></textarea>
           <div id="quickPreview" class="preview-list"></div>
           <div class="quick-actions">
             <button class="button" type="submit">Log entries</button>
-            <button id="quickClearBtn" class="button ghost" type="button">Clear</button>
+            <button id="quickClearBtn" class="button ghost icon" type="button" aria-label="Clear quick entries" title="Clear quick entries">${actionIcon("eraser")}</button>
           </div>
         </form>
-      </article>
-    </section>
+      </div>
+    </details>
 
-    <section class="metric-grid" aria-label="Monthly summary">
-      ${metricCard("Income", formatMoney(income), "Excludes transfers")}
-      ${metricCard("Spending", formatMoney(expense), "Excludes transfers")}
-      ${metricCard("Net Cashflow", formatMoney(net), `${income > 0 ? Math.round((net / income) * 100) : 0}% savings rate`)}
-      ${metricCard("Net Worth", formatMoney(totalBalance()), `${state.accounts.length} accounts`)}
-    </section>
-
-    <section class="dashboard-grid">
+    <section class="workspace-grid">
       <div class="stack">
         <article class="card">
           <div class="card-header">
@@ -711,11 +957,12 @@ function renderDashboard() {
             <h2 class="card-title">Recent activity</h2>
             <button class="button ghost small" type="button" data-jump-view="transactions">View all</button>
           </div>
-          ${recent.length ? `<div class="transaction-list">${recent.map(renderTransactionRow).join("")}</div>` : emptyState("No transactions yet.")}
+          ${recent.length ? `<div class="transaction-list">${recent.map((tx) => renderTransactionRow(tx)).join("")}</div>` : emptyState("No transactions yet.")}
         </article>
       </div>
 
       <div class="stack">
+        ${renderStatementCoverage(month)}
         <article class="card">
           <div class="card-header">
             <h2 class="card-title">Accounts</h2>
@@ -731,7 +978,7 @@ function renderDashboard() {
             <h2 class="card-title">Transfers</h2>
             <span class="chip">${transfers.length} this month</span>
           </div>
-          ${transfers.length ? `<div class="transaction-list">${transfers.slice(0, 4).map(renderTransactionRow).join("")}</div>` : emptyState("No transfers this month.")}
+          ${transfers.length ? `<div class="transaction-list">${transfers.slice(0, 4).map((tx) => renderTransactionRow(tx)).join("")}</div>` : emptyState("No transfers this month.")}
         </article>
 
         <article class="card">
@@ -764,10 +1011,10 @@ function renderTransactions() {
   return `
     ${pageHeader("Transactions", `${state.transactions.length} total entries`, "")}
     <div class="stack">
-      <article class="card">
+      <details class="card transaction-compose" ${editing ? "open" : ""}><summary>${editing ? "Edit transaction" : "+ Add transaction"}</summary><div>
         <div class="card-header">
           <h2 class="card-title">${editing ? "Edit transaction" : "New transaction"}</h2>
-          ${editing ? `<button id="cancelEditBtn" class="button ghost small" type="button">Cancel</button>` : ""}
+          ${editing ? `<button id="cancelEditBtn" class="button ghost small icon" type="button" aria-label="Cancel editing" title="Cancel editing">${actionIcon("x")}</button>` : ""}
         </div>
         <form id="transactionForm" class="form-grid">
           <label class="field span-2">
@@ -817,15 +1064,45 @@ function renderTransactions() {
             <input id="txNote" class="control" type="text" value="${editing ? escapeHtml(editing.note) : ""}" placeholder="Optional">
           </label>
           <div class="span-12 row-actions">
-            <button class="button" type="submit">${editing ? "Save changes" : "Add transaction"}</button>
+            <button class="button icon" type="submit" aria-label="${editing ? "Save changes" : "Add transaction"}" title="${editing ? "Save changes" : "Add transaction"}">${actionIcon(editing ? "save" : "plus")}</button>
           </div>
         </form>
-      </article>
+      </div></details>
 
       <article class="card">
+        <div class="toolbar">
+          <h2 class="card-title">Ledger</h2>
+          <div class="filter-row">
+            <input id="txSearch" class="control" type="search" placeholder="Search transactions" aria-label="Search transactions">
+            <select id="txFilterType" class="control" aria-label="Filter type">
+              <option value="all">All types</option>
+              <option value="expense">Expenses</option>
+              <option value="income">Income</option>
+              <option value="transfer">Transfers</option>
+            </select>
+            <select id="txFilterAccount" class="control" aria-label="Filter account">
+              <option value="all">All accounts</option>
+              ${accountOptions()}
+            </select>
+          </div>
+        </div>
+        <div id="transactionList" class="ledger-table-wrap">
+          ${renderLedgerTable(txs)}
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+function renderImports() {
+  return `
+    ${pageHeader("Imports & review", "Bring your statements together, one confirmed transaction at a time.", "")}
+    <div class="imports-intro card"><ol class="import-steps"><li><strong>1. Convert locally</strong><span>PDF → statement JSON</span></li><li><strong>2. Review</strong><span>Accounts, dates and overlaps</span></li><li><strong>3. Save</strong><span>Into your encrypted ledger</span></li></ol><p class="muted">Statement JSON opens a review before saving. Legacy CSV and text imports use the selected default account and import directly.</p></div>
+    <div class="stack">
+      <article class="card">
         <div class="card-header">
-          <h2 class="card-title">Bulk upload</h2>
-          <span class="chip">Text, bank CSV, JSON</span>
+          <h2 class="card-title">Upload statement JSON</h2>
+          <span class="chip">Local processing</span>
         </div>
         <div class="form-grid">
           <label class="field span-4">
@@ -841,47 +1118,52 @@ function renderTransactions() {
               <option value="transactions">Only import transactions</option>
             </select>
           </label>
-          ${renderBulkImportExamples()}
-          <label class="field span-12">
-            <span class="field-label">Paste entries</span>
-            <textarea id="bulkText" class="control" placeholder="Paste quick text, CSV, bank CSV, or JSON here"></textarea>
-          </label>
-          <div class="span-12 quick-actions">
-            <button id="bulkTextBtn" class="button" type="button">Import pasted entries</button>
-            <label class="button ghost file-button" for="bulkFile">Upload file</label>
+          <div class="import-dropzone span-12">
+            <strong>Choose a converted statement</strong>
+            <p class="muted">PDFs stay on your device. Convert them with the local tool, then upload the JSON here.</p>
+            <label class="button file-button" for="bulkFile">Choose JSON, CSV or text file</label>
             <input id="bulkFile" class="sr-only" type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json">
           </div>
+          <details class="span-12 format-help"><summary>Paste entries or see supported formats</summary>
+            <label class="field"><span class="field-label">Paste entries</span><textarea id="bulkText" class="control" placeholder="Quick text, CSV, bank CSV or JSON"></textarea></label>
+            <button id="bulkTextBtn" class="button" type="button">Import pasted entries</button>
+            ${renderBulkImportExamples()}
+          </details>
         </div>
       </article>
 
-      <article class="card">
-        <div class="toolbar">
-          <h2 class="card-title">Ledger</h2>
-          <div class="filter-row">
-            <input id="txSearch" class="control" type="search" placeholder="Search">
-            <select id="txFilterType" class="control" aria-label="Filter type">
-              <option value="all">All types</option>
-              <option value="expense">Expenses</option>
-              <option value="income">Income</option>
-              <option value="transfer">Transfers</option>
-            </select>
-            <select id="txFilterAccount" class="control" aria-label="Filter account">
-              <option value="all">All accounts</option>
-              ${accountOptions()}
-            </select>
-          </div>
-        </div>
-        <div id="transactionList" class="transaction-list">
-          ${txs.length ? txs.map(renderTransactionRow).join("") : emptyState("No transactions yet.")}
-        </div>
-      </article>
-    </div>
-  `;
+      ${renderStatementImportPreview()}
+      ${renderStatementImportHistory()}
+
+    </div>`;
+}
+
+function renderStatementCoverage(month) {
+  const start = `${month}-01`;
+  const end = `${month}-${String(new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate()).padStart(2, "0")}`;
+  const sections = (state.importBatches || []).filter((batch) => batch.kind === "statement").flatMap((batch) => batch.statements || []).filter((section) => section.period?.status === "user_confirmed" && section.period.start <= end && section.period.end >= start);
+  const byAccount = new Map();
+  sections.forEach((section) => {
+    if (!byAccount.has(section.accountId)) byAccount.set(section.accountId, []);
+    byAccount.get(section.accountId).push(section.period);
+  });
+  const rows = [...byAccount].map(([id, periods]) => `<div class="statement-batch"><div><strong>${escapeHtml(findAccount(id)?.name || "Account")}</strong><p class="muted">${periods.map((period) => `${escapeHtml(period.start)} – ${escapeHtml(period.end)}`).join("<br>")}</p></div></div>`).join("");
+  return `<article class="card workspace-coverage"><div class="card-header"><h2 class="card-title">Statement coverage</h2><button class="button ghost small" data-jump-view="imports" type="button">Manage</button></div>${rows || emptyState("No confirmed statement coverage for this month.")}<p class="muted">Confirmed statement periods only. Recorded activity alone does not prove complete coverage.</p></article>`;
+}
+
+function renderLedgerTable(txs, accountContextId = "") {
+  if (!txs.length) return emptyState("No matching transactions. Add one or import a statement to begin.");
+  return `<table class="ledger-table" role="table"><caption class="sr-only">Recorded transactions</caption><thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Date</th><th scope="col" role="columnheader">Transaction</th><th scope="col" role="columnheader">Account</th><th scope="col" role="columnheader">Amount</th><th scope="col" role="columnheader">Actions</th></tr></thead><tbody role="rowgroup">${txs.map((tx) => {
+    const from = findAccount(tx.accountId);
+    const to = findAccount(tx.toAccountId);
+    const display = transactionAmountDisplay(tx, accountContextId);
+    return `<tr role="row"><td role="cell" data-label="Date">${formatDate(tx.date)}</td><td role="cell" data-label="Transaction"><p class="transaction-title">${escapeHtml(tx.description)}</p><div class="transaction-meta"><span>${escapeHtml(tx.type === "transfer" ? "Transfer" : tx.category)}</span>${(tx.tags || []).map((tag) => `<span class="tag-chip">${escapeHtml(tag)}</span>`).join("")}${tx.note ? `<span>${escapeHtml(tx.note)}</span>` : ""}</div></td><td role="cell" data-label="Account">${escapeHtml(from?.name || "Account")}${tx.type === "transfer" ? ` → ${escapeHtml(to?.name || "Account")}` : ""}</td><td role="cell" data-label="Amount"><span class="amount ${display.amountClass}">${display.sign}${formatMoney(tx.amount)}</span></td><td role="cell" data-label="Actions"><div class="row-actions"><button class="button ghost small icon" type="button" data-edit-transaction="${escapeHtml(tx.id)}" aria-label="Edit ${escapeHtml(tx.description)}" title="Edit ${escapeHtml(tx.description)}">${actionIcon("pencil")}</button><button class="button ghost small icon is-danger" type="button" data-delete-transaction="${escapeHtml(tx.id)}" aria-label="Delete ${escapeHtml(tx.description)}" title="Delete ${escapeHtml(tx.description)}">${actionIcon("trash")}</button></div></td></tr>`;
+  }).join("")}</tbody></table>`;
 }
 
 function renderBulkImportExamples() {
   return `
-    <details class="format-help span-12" open>
+    <details class="format-help span-12">
       <summary>
         <span>Supported formats</span>
         <span class="format-pills">
@@ -970,7 +1252,7 @@ function renderBudgets() {
     <article class="card">
       <div class="card-header">
         <h2 class="card-title">Monthly category limits</h2>
-        <button id="saveBudgetsBtn" class="button" type="button">Save limits</button>
+        <button id="saveBudgetsBtn" class="button icon" type="button" aria-label="Save budget limits" title="Save budget limits">${actionIcon("save")}</button>
       </div>
       <div class="budget-list">${rows}</div>
     </article>
@@ -1019,7 +1301,7 @@ function renderAccounts() {
             <input id="accountColor" class="control" type="color" value="#0f766e">
           </label>
           <div class="span-12 row-actions">
-            <button class="button" type="submit">Add account</button>
+            <button class="button icon" type="submit" aria-label="Add account" title="Add account">${actionIcon("plus")}</button>
           </div>
         </form>
       </article>
@@ -1045,7 +1327,7 @@ function renderAccounts() {
             <input id="newAccountCategoryColor" class="control" type="color" value="#4d69c8">
           </label>
           <div class="span-12 row-actions">
-            <button class="button" type="submit">Add category</button>
+            <button class="button icon" type="submit" aria-label="Add category" title="Add category">${actionIcon("plus")}</button>
           </div>
         </form>
       </article>
@@ -1081,7 +1363,7 @@ function renderAccounts() {
           <input id="checkpointNote" class="control" type="text" placeholder="Statement closing balance, manual reconciliation">
         </label>
         <div class="span-12 row-actions">
-          <button class="button" type="submit">Save checkpoint</button>
+          <button class="button icon" type="submit" aria-label="Save balance checkpoint" title="Save balance checkpoint">${actionIcon("save")}</button>
         </div>
       </form>
     </article>
@@ -1222,7 +1504,7 @@ function renderGoals() {
             <input id="goalDue" class="control" type="date">
           </label>
           <div class="span-12 row-actions">
-            <button class="button" type="submit">Add goal</button>
+            <button class="button icon" type="submit" aria-label="Add goal" title="Add goal">${actionIcon("plus")}</button>
           </div>
         </form>
       </article>
@@ -1271,7 +1553,7 @@ function renderBills() {
             </select>
           </label>
           <div class="span-12 row-actions">
-            <button class="button" type="submit">Add bill</button>
+            <button class="button icon" type="submit" aria-label="Add bill" title="Add bill">${actionIcon("plus")}</button>
           </div>
         </form>
       </article>
@@ -1285,6 +1567,10 @@ function renderBills() {
       </article>
     </div>
   `;
+}
+
+function renderGuide() {
+  return `${pageHeader("User’s Guide", "Step-by-step help for every available feature.", "")}${window.ManimanGuide.render()}`;
 }
 
 function renderSettings() {
@@ -1301,12 +1587,16 @@ function renderSettings() {
           <label class="field span-6">
             <span class="field-label">Currency</span>
             <select id="settingsCurrency" class="control">
-              ${["USD", "INR", "EUR", "GBP", "AUD", "CAD", "SGD"].map((code) => `<option value="${code}" ${state.settings.currency === code ? "selected" : ""}>${code}</option>`).join("")}
+              ${["INR", "USD", "EUR", "GBP", "AUD", "CAD", "SGD"].map((code) => `<option value="${code}" ${state.settings.currency === code ? "selected" : ""}>${code}</option>`).join("")}
             </select>
           </label>
           <label class="field span-6">
             <span class="field-label">Default month</span>
             <input id="settingsMonth" class="control" type="month" value="${state.settings.selectedMonth}">
+          </label>
+          <label class="field span-6">
+            <span class="field-label">Auto-lock after inactivity (minutes)</span>
+            <input id="settingsAutoLock" class="control" type="number" min="1" max="120" value="${Math.max(1, Math.min(120, Number(state.settings.vaultAutoLockMinutes || 15)))}">
           </label>
         </div>
       </article>
@@ -1318,7 +1608,7 @@ function renderSettings() {
         </div>
         <div class="stack">
           <span class="chip">${serverLabel}</span>
-          <button id="settingsExportBtn" class="button" type="button">Export JSON</button>
+          <button id="settingsExportBtn" class="button" type="button">Export encrypted backup</button>
           <label class="button ghost file-button" for="settingsImportFile">Import JSON</label>
           <input id="settingsImportFile" class="sr-only" type="file" accept="application/json,.json">
           <button id="freshStartBtn" class="button ghost" type="button">Start fresh</button>
@@ -1359,7 +1649,7 @@ function renderSettings() {
             <input id="newTxCategoryColor" class="control" type="color" value="#6b7280">
           </label>
           <div class="span-12 row-actions">
-            <button class="button" type="submit">Add category</button>
+            <button class="button icon" type="submit" aria-label="Add category" title="Add category">${actionIcon("plus")}</button>
           </div>
         </form>
       </article>
@@ -1382,7 +1672,7 @@ function renderSettings() {
             <input id="newTagColor" class="control" type="color" value="#0f766e">
           </label>
           <div class="span-12 row-actions">
-            <button class="button" type="submit">Add tag</button>
+            <button class="button icon" type="submit" aria-label="Add tag" title="Add tag">${actionIcon("plus")}</button>
           </div>
         </form>
         <div class="tag-list section-gap-small">
@@ -1412,6 +1702,7 @@ function renderCloudSyncSettings() {
         <div class="row-actions">
           <button id="cloudSaveNowBtn" class="button" type="button">Sync now</button>
           <button id="cloudSignOutBtn" class="button ghost" type="button">Sign out</button>
+          ${cloud.conflictEnvelope ? `<button id="cloudConflictExportBtn" class="button ghost" type="button">Export remote encrypted copy</button>` : ""}
         </div>
       </div>
     `;
@@ -1436,7 +1727,7 @@ function renderCloudSyncSettings() {
 }
 
 function bindViewEvents() {
-  document.querySelectorAll("[data-jump-view]").forEach((button) => {
+  dom.viewRoot.querySelectorAll("[data-jump-view]").forEach((button) => {
     button.addEventListener("click", () => {
       activeView = button.dataset.jumpView;
       state.settings.lastView = activeView;
@@ -1447,11 +1738,13 @@ function bindViewEvents() {
 
   if (activeView === "dashboard") bindDashboardEvents();
   if (activeView === "transactions") bindTransactionEvents();
+  if (activeView === "imports") bindImportEvents();
   if (activeView === "budgets") bindBudgetEvents();
   if (activeView === "accounts") bindAccountEvents();
   if (activeView === "goals") bindGoalEvents();
   if (activeView === "bills") bindBillEvents();
   if (activeView === "settings") bindSettingsEvents();
+  if (activeView === "guide") window.ManimanGuide.bind(dom.viewRoot);
 
   bindTransactionRowActions();
 }
@@ -1508,14 +1801,6 @@ function bindTransactionEvents() {
   const filterType = document.querySelector("#txFilterType");
   const filterAccount = document.querySelector("#txFilterAccount");
   const cancel = document.querySelector("#cancelEditBtn");
-  const bulkText = document.querySelector("#bulkText");
-  const bulkTextBtn = document.querySelector("#bulkTextBtn");
-  const bulkFile = document.querySelector("#bulkFile");
-  const bulkImportOptions = () => ({
-    defaultAccountId: document.querySelector("#bulkAccount").value,
-    createCheckpoint: document.querySelector("#bulkBalanceMode").value === "checkpoint"
-  });
-
   const updateTypeFields = () => {
     const isTransfer = type.value === "transfer";
     document.querySelector("#txToAccountField").hidden = !isTransfer;
@@ -1564,13 +1849,24 @@ function bindTransactionEvents() {
       return matchesQuery && matchesType && matchesAccount;
     });
     const list = document.querySelector("#transactionList");
-    list.innerHTML = filtered.length ? filtered.map((tx) => renderTransactionRow(tx, accountValue === "all" ? "" : accountValue)).join("") : emptyState("No matching entries.");
+    list.innerHTML = renderLedgerTable(filtered, accountValue === "all" ? "" : accountValue);
     bindTransactionRowActions(list);
   };
 
   search.addEventListener("input", filter);
   filterType.addEventListener("change", filter);
   filterAccount.addEventListener("change", filter);
+
+}
+
+function bindImportEvents() {
+  const bulkText = document.querySelector("#bulkText");
+  const bulkTextBtn = document.querySelector("#bulkTextBtn");
+  const bulkFile = document.querySelector("#bulkFile");
+  const bulkImportOptions = () => ({
+    defaultAccountId: document.querySelector("#bulkAccount").value,
+    createCheckpoint: document.querySelector("#bulkBalanceMode").value === "checkpoint"
+  });
 
   bulkTextBtn.addEventListener("click", () => {
     importTransactionText(bulkText.value, "", bulkImportOptions());
@@ -1579,13 +1875,23 @@ function bindTransactionEvents() {
   bulkFile.addEventListener("change", (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (file.size > 20 * 1024 * 1024) {
+      showToast("Import files must be 20 MB or smaller.");
+      event.target.value = "";
+      return;
+    }
+    const options = bulkImportOptions();
+    const owner = captureVaultContext();
     const reader = new FileReader();
     reader.onload = () => {
-      importTransactionText(String(reader.result || ""), file.name, bulkImportOptions());
+      if (!vaultContextMatches(owner)) { event.target.value = ""; return; }
+      importTransactionText(String(reader.result || ""), file.name, options);
       event.target.value = "";
     };
     reader.readAsText(file);
   });
+
+  bindStatementImportEvents();
 }
 
 function transactionFromForm() {
@@ -1849,10 +2155,13 @@ function bindBillEvents() {
 }
 
 function bindSettingsEvents() {
-  document.querySelector("#settingsCurrency").addEventListener("change", (event) => {
-    state.settings.currency = event.target.value;
+  document.querySelector("#settingsAutoLock")?.addEventListener("change", (event) => {
+    state.settings.vaultAutoLockMinutes = Math.max(1, Math.min(120, Number(event.target.value) || 15));
     saveState();
-    render();
+    document.dispatchEvent(new Event("pointerdown"));
+  });
+  document.querySelector("#settingsCurrency").addEventListener("change", (event) => {
+    setDisplayCurrency(event.target.value);
   });
 
   document.querySelector("#settingsMonth").addEventListener("change", (event) => {
@@ -1931,6 +2240,7 @@ function bindCloudSettingsEvents() {
   const signUpButton = document.querySelector("#cloudSignUpBtn");
   const signOutButton = document.querySelector("#cloudSignOutBtn");
   const saveNowButton = document.querySelector("#cloudSaveNowBtn");
+  document.querySelector("#cloudConflictExportBtn")?.addEventListener("click", () => window.ManimanVaultAccess.downloadEnvelope(cloud.conflictEnvelope));
 
   if (authForm) {
     authForm.addEventListener("submit", (event) => {
@@ -1963,6 +2273,23 @@ function bindCloudSettingsEvents() {
   }
 }
 
+const ACTION_ICON_SHAPES = {
+    "pencil": "<path d=\"M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z\" /><path d=\"m15 5 4 4\" />",
+    "trash": "<path d=\"M10 11v6\" /><path d=\"M14 11v6\" /><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\" /><path d=\"M3 6h18\" /><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\" />",
+    "save": "<path d=\"M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z\" /><path d=\"M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7\" /><path d=\"M7 3v4a1 1 0 0 0 1 1h7\" />",
+    "x": "<path d=\"M18 6 6 18\" /><path d=\"m6 6 12 12\" />",
+    "rotate-ccw": "<path d=\"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8\" /><path d=\"M3 3v5h5\" />",
+    "chevron-left": "<path d=\"m15 18-6-6 6-6\" />",
+    "chevron-right": "<path d=\"m9 18 6-6-6-6\" />",
+    "check": "<path d=\"M20 6 9 17l-5-5\" />",
+    "eraser": "<path d=\"M21 21H8a2 2 0 0 1-1.42-.587l-3.994-3.999a2 2 0 0 1 0-2.828l10-10a2 2 0 0 1 2.829 0l5.999 6a2 2 0 0 1 0 2.828L12.834 21\" /><path d=\"m5.082 11.09 8.828 8.828\" />",
+    "plus": "<path d=\"M5 12h14\" /><path d=\"M12 5v14\" />",
+    "circle-minus": "<circle cx=\"12\" cy=\"12\" r=\"10\" /><path d=\"M8 12h8\" />"
+};
+function actionIcon(name) {
+  return `<svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ACTION_ICON_SHAPES[name] || ACTION_ICON_SHAPES.plus}</svg>`;
+}
+
 function pageHeader(title, subtitle, action) {
   return `
     <div class="view-header">
@@ -1984,8 +2311,9 @@ function storageModeLabel() {
     if (syncStatus === "cloud-conflict") return "Cloud conflict";
     return "Cloud";
   }
-  if (storageMode === "server") return "Local server";
-  return "Browser storage";
+  if (syncStatus === "cloud-conflict") return "Encrypted copy conflict";
+  if (storageMode === "server") return "Encrypted browser + local server";
+  return "Encrypted browser vault";
 }
 
 function metricCard(label, value, note) {
@@ -2077,8 +2405,8 @@ function renderTransactionRow(tx, accountContextId = "") {
       </div>
       <div class="row-actions">
         <span class="amount ${display.amountClass}">${display.sign}${formatMoney(tx.amount)}</span>
-        <button class="button ghost small" type="button" data-edit-transaction="${tx.id}">Edit</button>
-        <button class="button ghost small" type="button" data-delete-transaction="${tx.id}">Delete</button>
+        <button class="button ghost small icon" type="button" data-edit-transaction="${escapeHtml(tx.id)}" aria-label="Edit transaction: ${escapeHtml(tx.description)}" title="Edit transaction: ${escapeHtml(tx.description)}">${actionIcon("pencil")}</button>
+        <button class="button ghost small icon is-danger" type="button" data-delete-transaction="${escapeHtml(tx.id)}" aria-label="Delete transaction: ${escapeHtml(tx.description)}" title="Delete transaction: ${escapeHtml(tx.description)}">${actionIcon("trash")}</button>
       </div>
     </div>
   `;
@@ -2167,8 +2495,8 @@ function renderAccountRow(account) {
       </div>
       <div class="row-actions">
         <span class="amount">${formatMoney(accountBalance(account.id))}</span>
-        ${canDeleteCheckpoint ? `<button class="button ghost small" type="button" data-delete-checkpoint="${checkpoint.id}" data-checkpoint-account="${account.id}">Remove checkpoint</button>` : ""}
-        <button class="button ghost small" type="button" data-delete-account="${account.id}">Delete</button>
+        ${canDeleteCheckpoint ? `<button class="button ghost small icon" type="button" data-delete-checkpoint="${checkpoint.id}" data-checkpoint-account="${account.id}" aria-label="Remove balance checkpoint: ${escapeHtml(account.name)}" title="Remove balance checkpoint: ${escapeHtml(account.name)}">${actionIcon("circle-minus")}</button>` : ""}
+        <button class="button ghost small icon is-danger" type="button" data-delete-account="${account.id}" aria-label="Delete account: ${escapeHtml(account.name)}" title="Delete account: ${escapeHtml(account.name)}">${actionIcon("trash")}</button>
       </div>
     </div>
   `;
@@ -2230,8 +2558,8 @@ function renderGoalRow(goal) {
       </div>
       <div class="row-actions">
         <input class="control compact" data-goal-saved="${goal.id}" type="number" min="0" step="0.01" value="${goal.saved}">
-        <button class="button small" type="button" data-save-goal="${goal.id}">Save</button>
-        <button class="button ghost small" type="button" data-delete-goal="${goal.id}">Delete</button>
+        <button class="button small icon" type="button" data-save-goal="${goal.id}" aria-label="Save goal progress: ${escapeHtml(goal.name)}" title="Save goal progress: ${escapeHtml(goal.name)}">${actionIcon("save")}</button>
+        <button class="button ghost small icon is-danger" type="button" data-delete-goal="${goal.id}" aria-label="Delete goal: ${escapeHtml(goal.name)}" title="Delete goal: ${escapeHtml(goal.name)}">${actionIcon("trash")}</button>
       </div>
     </div>
   `;
@@ -2272,8 +2600,8 @@ function renderBillRow(bill) {
       </div>
       <div class="row-actions">
         <span class="chip ${paid ? "green" : "amber"}">${paid ? "Paid" : "Due"}</span>
-        <button class="button small" type="button" data-toggle-bill="${bill.id}">${paid ? "Undo" : "Mark paid"}</button>
-        <button class="button ghost small" type="button" data-delete-bill="${bill.id}">Delete</button>
+        <button class="button small icon" type="button" data-toggle-bill="${escapeHtml(bill.id)}" aria-label="${paid ? "Mark unpaid" : "Mark paid"}: ${escapeHtml(bill.name)}" title="${paid ? "Mark unpaid" : "Mark paid"}: ${escapeHtml(bill.name)}">${actionIcon(paid ? "rotate-ccw" : "check")}</button>
+        <button class="button ghost small icon is-danger" type="button" data-delete-bill="${bill.id}" aria-label="Delete bill: ${escapeHtml(bill.name)}" title="Delete bill: ${escapeHtml(bill.name)}">${actionIcon("trash")}</button>
       </div>
     </div>
   `;
@@ -2377,7 +2705,407 @@ function parseQuickEntry(part, options = {}) {
   };
 }
 
+function isStatementEnvelope(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && value.format === "maniman.statement");
+}
+
+function statementDocumentIdentity(value) {
+  return value.source.documentFingerprint || value.source.documentId;
+}
+
+function statementObservationIdentity(documentValue, section, row) {
+  return JSON.stringify([statementDocumentIdentity(documentValue), section.statementId, row.observationId]);
+}
+
+function statementSourceMappingKey(institution, account) {
+  if (!institution || !account.maskedIdentifier) return "";
+  return JSON.stringify([institution.trim().toLowerCase(), account.kind || "unknown", account.maskedIdentifier.trim().toUpperCase(), account.currency || ""]);
+}
+
+function statementIssueErrors(value) {
+  const issues = [...(value.issues || [])];
+  (value.statements || []).forEach((section) => {
+    issues.push(...(section.extraction?.issues || []));
+    (section.transactions || []).forEach((row) => issues.push(...(row.issues || [])));
+  });
+  const errors = issues.filter((issue) => issue.severity === "error").map(() => "Resolve converter errors before importing this statement.");
+  (value.statements || []).forEach((section) => {
+    if (section.extraction?.status !== "complete" || section.extraction?.excludedRows?.length) {
+      errors.push("This extraction is incomplete. Resolve excluded or missing rows in the local converter first.");
+    }
+  });
+  return [...new Set(errors)];
+}
+
+function stageStatementImport(value, options = {}) {
+  if (!state || !window.ManimanSecureStorage?.isUnlocked()) return showToast("Unlock the vault before reviewing statement files.");
+  if (!window.ManimanStatement) {
+    showToast("The statement validator is unavailable. Reload the app before importing.");
+    return;
+  }
+  const validation = window.ManimanStatement.validateStatementDocument(value);
+  pendingStatementImport = {
+    document: value,
+    validation,
+    options,
+    institutionName: value.institution?.name || "",
+    sections: validation.valid ? value.statements.map((section) => {
+      const mappingKey = statementSourceMappingKey(value.institution?.name, section.account);
+      const accountId = confirmedStatementMappingAccount(state, mappingKey);
+      return {
+        accountId,
+        newAccountName: "",
+        newAccountKind: section.account.kind || "savings",
+        periodStart: section.period?.start || "",
+        periodEnd: section.period?.end || "",
+        rows: section.transactions.map(() => ({ type: "", toAccountId: "", linkTransactionId: "" }))
+      };
+    }) : [],
+    page: 0,
+    reviewed: false,
+    error: ""
+  };
+  activeView = "imports";
+  render();
+  document.querySelector("#statementImportPreview")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function clearStatementImport() {
+  pendingStatementImport = null;
+}
+
+function confirmedStatementMappingAccount(currentState, key) {
+  if (!key) return "";
+  const candidates = new Set((currentState.statementMappings || []).filter((mapping) => mapping.key === key && currentState.accounts.some((account) => account.id === mapping.accountId)).map((mapping) => mapping.accountId));
+  return candidates.size === 1 ? [...candidates][0] : "";
+}
+
+if (typeof window.addEventListener === "function") {
+  window.addEventListener("maniman-vault-locked", clearStatementImport);
+}
+
+function statementMatchCandidates(row, accountId, currentState) {
+  const exponent = window.ManimanStatement.currencyExponent(row.currency);
+  return currentState.transactions.filter((tx) =>
+    (tx.accountId === accountId || tx.toAccountId === accountId)
+    && tx.date === row.transactionDate
+    && Math.round(tx.amount * (10 ** exponent)) === row.amountMinor
+    && (!tx.currency || tx.currency === row.currency)
+  );
+}
+
+function renderStatementImportPreview() {
+  const pending = pendingStatementImport;
+  if (!pending) return "";
+  const { document: input, validation } = pending;
+  const warnings = validation.warnings || [];
+  const errors = [...(validation.errors || []).map((item) => `${item.path}: ${item.message}`), ...(validation.valid ? statementIssueErrors(input) : [])];
+  const locked = !window.ManimanSecureStorage?.isUnlocked();
+  const sections = validation.valid ? input.statements.map((section, sectionIndex) => {
+    const config = pending.sections[sectionIndex];
+    return `<fieldset class="statement-section"><legend>Account ${sectionIndex + 1}: ${escapeHtml(section.account.maskedIdentifier || "identifier unavailable")}</legend>
+      <p class="muted">Source account type: ${escapeHtml(section.account.kind || "unknown")} · Currency: ${escapeHtml(section.account.currency || "unknown")}</p>
+      <div class="form-grid">
+        <label class="field span-6"><span class="field-label">Use account</span><select class="control" data-statement-account="${sectionIndex}">
+          <option value="">Choose an account explicitly</option>${state.accounts.map((account) => `<option value="${escapeHtml(account.id)}" ${config.accountId === account.id ? "selected" : ""}>${escapeHtml(account.name)}</option>`).join("")}
+          <option value="__new__" ${config.accountId === "__new__" ? "selected" : ""}>Create an account</option></select></label>
+        ${config.accountId === "__new__" ? `<label class="field span-6"><span class="field-label">New account alias</span><input class="control" data-statement-section="${sectionIndex}" data-statement-property="newAccountName" value="${escapeHtml(config.newAccountName)}" placeholder="Choose a memorable account name"></label>
+          <label class="field span-6"><span class="field-label">New account type</span><select class="control" data-statement-section="${sectionIndex}" data-statement-property="newAccountKind">${["savings", "current", "credit_card", "wallet", "cash", "investment"].map((kind) => `<option value="${kind}" ${config.newAccountKind === kind ? "selected" : ""}>${kind.replace(/_/g, " ")}</option>`).join("")}</select></label>` : ""}
+        <label class="field span-3"><span class="field-label">Confirm statement start</span><input class="control" type="date" data-statement-section="${sectionIndex}" data-statement-property="periodStart" value="${escapeHtml(config.periodStart)}"></label>
+        <label class="field span-3"><span class="field-label">Confirm statement end</span><input class="control" type="date" data-statement-section="${sectionIndex}" data-statement-property="periodEnd" value="${escapeHtml(config.periodEnd)}"></label>
+      </div>
+      <p class="muted">Observed transaction dates: ${escapeHtml(section.observedTransactionRange?.start || "none")} – ${escapeHtml(section.observedTransactionRange?.end || "none")}. This is separate from statement coverage.</p>
+    </fieldset>`;
+  }).join("") : "";
+  const flattened = validation.valid ? input.statements.flatMap((section, sectionIndex) => section.transactions.map((row, rowIndex) => ({ row, rowIndex, sectionIndex }))) : [];
+  const pageSize = 30;
+  const pageRows = flattened.slice(pending.page * pageSize, (pending.page + 1) * pageSize);
+  const rows = pageRows.map(({ row, rowIndex, sectionIndex }) => {
+    const config = pending.sections[sectionIndex];
+    const choice = config.rows[rowIndex];
+    const existingObservation = (state.statementObservations || []).find((item) => item.id === statementObservationIdentity(input, input.statements[sectionIndex], row));
+    const candidates = config.accountId && config.accountId !== "__new__" ? statementMatchCandidates(row, config.accountId, state) : [];
+    const rowKey = `${sectionIndex}:${rowIndex}`;
+    return `<tr><td>${escapeHtml(row.transactionDate)}<br><span class="muted">Account ${sectionIndex + 1}</span></td><td class="statement-description">${escapeHtml(row.description)}<br><span class="muted">PDF page ${row.sourceLocation?.page || "?"}, row ${row.sourceLocation?.row || "?"}</span></td>
+      <td>${escapeHtml(row.currency)} ${(row.amountMinor / (10 ** window.ManimanStatement.currencyExponent(row.currency))).toLocaleString(undefined, { minimumFractionDigits: window.ManimanStatement.currencyExponent(row.currency) })}<br>${escapeHtml(row.direction)}</td>
+      <td>${existingObservation ? `<span class="chip">Already imported</span>` : `<select class="control" aria-label="Transaction treatment" data-statement-row="${rowKey}" data-statement-field="type"><option value="">Choose treatment</option>${["expense", "income", "transfer"].map((type) => `<option value="${type}" ${choice.type === type ? "selected" : ""}>${titleCase(type)}</option>`).join("")}</select>
+        ${choice.type === "transfer" ? `<select class="control" aria-label="Other owned account" data-statement-row="${rowKey}" data-statement-field="toAccountId"><option value="">Other owned account</option>${state.accounts.filter((account) => account.id !== config.accountId).map((account) => `<option value="${escapeHtml(account.id)}" ${choice.toAccountId === account.id ? "selected" : ""}>${escapeHtml(account.name)}</option>`).join("")}</select>` : ""}
+        ${candidates.length ? `<select class="control" aria-label="Link existing transaction" data-statement-row="${rowKey}" data-statement-field="linkTransactionId"><option value="">Create a new transaction</option>${candidates.map((tx) => `<option value="${escapeHtml(tx.id)}" ${choice.linkTransactionId === tx.id ? "selected" : ""}>Link: ${escapeHtml(tx.description)}</option>`).join("")}</select>` : ""}`}</td></tr>`;
+  }).join("");
+  return `<article id="statementImportPreview" class="card statement-preview">
+    <div class="card-header"><h2 class="card-title">Review statement JSON</h2><button id="statementCancelBtn" type="button" class="button ghost small icon" aria-label="Discard statement preview" title="Discard statement preview">${actionIcon("x")}</button></div>
+    <p>Review account identity, coverage and transaction treatment before saving. Equal amounts and dates are suggestions for linking, not proof of a duplicate.</p>
+    ${locked ? `<p class="statement-warning">Unlock the encrypted local vault before committing statement data. <button class="button ghost small" data-jump-view="settings" type="button">Open Settings</button></p>` : ""}
+    ${errors.length ? `<div class="statement-error" role="alert"><strong>Import blocked</strong><ul>${errors.slice(0, 10).map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul></div>` : ""}
+    ${warnings.length ? `<details class="statement-warning"><summary>${warnings.length} extraction/metadata warnings</summary><ul>${warnings.slice(0, 30).map((item) => `<li>${escapeHtml(`${item.path}: ${item.message}`)}</li>`).join("")}</ul></details>` : ""}
+    ${pending.error ? `<p class="statement-error" role="alert">${escapeHtml(pending.error)}</p>` : ""}
+    ${validation.valid ? `<label class="field"><span class="field-label">Confirm institution name</span><input id="statementInstitution" class="control" value="${escapeHtml(pending.institutionName)}" placeholder="Bank, card issuer or wallet"></label>${sections}
+      <div class="row-actions"><button id="statementMarkDebits" class="button ghost small" type="button">Mark debit rows as expenses</button><button id="statementMarkCredits" class="button ghost small" type="button">Mark credit rows as income</button></div>
+      <p class="muted">Use these bulk actions only after reviewing transfers, refunds, lending and repayments. Linking an existing transaction preserves its classification.</p>
+      <div class="statement-table-scroll"><table class="statement-table"><thead><tr><th>Date</th><th>Source narration</th><th>Movement</th><th>Confirmed treatment</th></tr></thead><tbody>${rows || `<tr><td colspan="4">No transaction rows.</td></tr>`}</tbody></table></div>
+      <div class="row-actions"><button id="statementPrevPage" class="button ghost small icon" aria-label="Previous page" title="Previous page" type="button" ${pending.page === 0 ? "disabled" : ""}>${actionIcon("chevron-left")}</button><span>Rows ${flattened.length ? pending.page * pageSize + 1 : 0}–${Math.min((pending.page + 1) * pageSize, flattened.length)} of ${flattened.length}</span><button id="statementNextPage" class="button ghost small icon" aria-label="Next page" title="Next page" type="button" ${(pending.page + 1) * pageSize >= flattened.length ? "disabled" : ""}>${actionIcon("chevron-right")}</button></div>
+      <label class="statement-review-check"><input id="statementUseCheckpoints" type="checkbox" ${pending.options.createCheckpoint !== false ? "checked" : ""}> Use statement closing balances as checkpoints when their sign convention is known.</label>
+      <label class="statement-review-check"><input id="statementReviewed" type="checkbox" ${pending.reviewed ? "checked" : ""}> I reviewed all transaction treatments, account mappings, dates and extraction warnings.</label>
+      <button id="statementCommitBtn" class="button" type="button" ${locked || errors.length ? "disabled" : ""}>Save reviewed statement to encrypted vault</button>` : ""}
+  </article>`;
+}
+
+function renderStatementImportHistory() {
+  const batches = (state.importBatches || []).filter((batch) => batch.kind === "statement").slice(-5).reverse();
+  if (!batches.length) return "";
+  return `<article class="card"><h2 class="card-title">Recent statement imports</h2><p class="muted">Undo removes this batch's evidence. Transactions with other evidence or later edits are retained.</p>${batches.map((batch) => `<div class="statement-batch"><div><strong>${escapeHtml(batch.institution)}</strong><br><span class="muted">${escapeHtml(batch.createdAt.slice(0, 10))} · ${batch.observationIds.length} source rows</span></div><button type="button" class="button ghost small icon" data-undo-statement="${escapeHtml(batch.id)}" aria-label="Undo statement import" title="Undo statement import">${actionIcon("rotate-ccw")}</button></div>`).join("")}</article>`;
+}
+
+function bindStatementImportEvents() {
+  const pending = pendingStatementImport;
+  document.querySelector("#statementCancelBtn")?.addEventListener("click", () => { clearStatementImport(); render(); });
+  document.querySelector("#statementInstitution")?.addEventListener("input", (event) => { if (pending) pending.institutionName = event.target.value; });
+  document.querySelectorAll("[data-statement-account]").forEach((input) => input.addEventListener("change", (event) => {
+    pending.sections[Number(input.dataset.statementAccount)].accountId = event.target.value;
+    pending.reviewed = false;
+    render();
+  }));
+  document.querySelectorAll("[data-statement-section]").forEach((input) => input.addEventListener("change", (event) => {
+    pending.sections[Number(input.dataset.statementSection)][input.dataset.statementProperty] = event.target.value;
+    pending.reviewed = false;
+  }));
+  document.querySelectorAll("[data-statement-row]").forEach((input) => input.addEventListener("change", (event) => {
+    const [sectionIndex, rowIndex] = input.dataset.statementRow.split(":").map(Number);
+    pending.sections[sectionIndex].rows[rowIndex][input.dataset.statementField] = event.target.value;
+    pending.reviewed = false;
+    render();
+  }));
+  [["#statementMarkDebits", "debit", "expense"], ["#statementMarkCredits", "credit", "income"]].forEach(([selector, direction, type]) => {
+    document.querySelector(selector)?.addEventListener("click", () => {
+      pending.document.statements.forEach((section, index) => section.transactions.forEach((row, rowIndex) => {
+        if (row.direction === direction && !pending.sections[index].rows[rowIndex].type) pending.sections[index].rows[rowIndex].type = type;
+      }));
+      pending.reviewed = false;
+      render();
+    });
+  });
+  document.querySelector("#statementPrevPage")?.addEventListener("click", () => { pending.page -= 1; render(); });
+  document.querySelector("#statementNextPage")?.addEventListener("click", () => { pending.page += 1; render(); });
+  document.querySelector("#statementReviewed")?.addEventListener("change", (event) => { pending.reviewed = event.target.checked; });
+  document.querySelector("#statementUseCheckpoints")?.addEventListener("change", (event) => { pending.options.createCheckpoint = event.target.checked; pending.reviewed = false; document.querySelector("#statementReviewed").checked = false; });
+  document.querySelector("#statementCommitBtn")?.addEventListener("click", commitPendingStatementImport);
+  document.querySelectorAll("[data-undo-statement]").forEach((button) => button.addEventListener("click", async () => {
+    if (!window.ManimanSecureStorage?.isUnlocked()) return showToast("Unlock the encrypted vault before undoing an import.");
+    const next = undoStatementImportBatch(state, button.dataset.undoStatement);
+    const owner = window.ManimanSecureStorage.namespace();
+    setVaultOperationBusy(true);
+    try {
+      await window.ManimanSecureStorage.save(next);
+      if (!window.ManimanSecureStorage.isUnlocked() || owner !== window.ManimanSecureStorage.namespace()) return;
+      state = next;
+      render();
+      syncEncryptedState();
+      showToast("Import evidence removed. Other evidence and edited transactions were retained.");
+    } catch (error) {
+      showToast("Could not save the undo. The current ledger is unchanged.");
+    } finally { setVaultOperationBusy(false); }
+  }));
+}
+
+function statementCategoryForKind(kind, categories) {
+  const id = /credit/.test(kind) ? "acctcat_credit" : kind === "wallet" ? "acctcat_wallet" : kind === "cash" ? "acctcat_cash" : kind === "investment" ? "acctcat_mutual_funds" : "acctcat_savings";
+  return categories.some((item) => item.id === id) ? id : categories[0]?.id || "";
+}
+
+function buildStatementImportPlan(input, currentState, configuration) {
+  const validation = window.ManimanStatement.validateStatementDocument(input);
+  if (!validation.valid) return { valid: false, errors: validation.errors.map((item) => `${item.path}: ${item.message}`) };
+  const errors = statementIssueErrors(input);
+  if (!configuration.reviewed) errors.push("Confirm that you reviewed every row, mapping and warning.");
+  const institution = String(configuration.institutionName || "").trim();
+  if (!institution) errors.push("Confirm the institution name.");
+  const next = JSON.parse(JSON.stringify(currentState));
+  next.statementObservations ||= [];
+  next.importBatches ||= [];
+  next.statementMappings ||= [];
+  const batch = { id: uid("import"), kind: "statement", documentId: statementDocumentIdentity(input), createdAt: new Date().toISOString(), institution, source: input.source, statements: [], observationIds: [], createdTransactionIds: [], createdAccountIds: [], checkpointIds: [], transactionSnapshots: {}, skippedCount: 0, linkedCount: 0 };
+  let addedCoverage = 0;
+  const currentCurrency = currentState.settings.currency;
+  input.statements.forEach((section, sectionIndex) => {
+    const config = configuration.sections?.[sectionIndex];
+    if (!config) return errors.push(`Account ${sectionIndex + 1}: confirm the account mapping.`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(config.periodStart || "") || !isValidDateParts(...String(config.periodStart).split("-").map(Number)) || !/^\d{4}-\d{2}-\d{2}$/.test(config.periodEnd || "") || !isValidDateParts(...String(config.periodEnd).split("-").map(Number)) || config.periodStart > config.periodEnd) {
+      errors.push(`Account ${sectionIndex + 1}: confirm a valid statement start and end date.`);
+    }
+    const currency = section.account.currency || section.transactions[0]?.currency;
+    if (currency !== currentCurrency || section.transactions.some((row) => row.currency !== currentCurrency)) {
+      errors.push(`Account ${sectionIndex + 1}: this release requires statement currency to match the app currency (${currentCurrency}). Change the app currency or import into a matching vault.`);
+    }
+    let account = next.accounts.find((item) => item.id === config.accountId);
+    if (config.accountId === "__new__") {
+      const name = String(config.newAccountName || "").trim();
+      if (!name || next.accounts.some((item) => item.name.toLowerCase() === name.toLowerCase())) {
+        errors.push(`Account ${sectionIndex + 1}: choose a unique new account alias.`);
+      } else {
+        account = { id: uid("account"), name, institution, kind: config.newAccountKind || section.account.kind || "savings", maskedIdentifier: section.account.maskedIdentifier || "", currency, categoryId: statementCategoryForKind(config.newAccountKind || section.account.kind || "savings", next.accountCategories), openingBalance: 0, openingBalanceDate: "", balanceCheckpoints: [], color: "#0f766e" };
+        next.accounts.push(account);
+        batch.createdAccountIds.push(account.id);
+      }
+    }
+    if (!account) return errors.push(`Account ${sectionIndex + 1}: select or create an account.`);
+    if (account.currency && account.currency !== currency) errors.push(`Account ${sectionIndex + 1}: the selected account has a different currency.`);
+    const sectionObservationStart = batch.observationIds.length;
+    const alreadyCovered = (currentState.importBatches || []).some((item) => item.kind === "statement" && item.documentId === batch.documentId && item.statements.some((previous) => previous.statementId === section.statementId && previous.accountId === account.id && previous.period.start === config.periodStart && previous.period.end === config.periodEnd));
+    if (!alreadyCovered) addedCoverage += 1;
+    const coverage = { statementId: section.statementId, accountId: account.id, account: section.account, period: { start: config.periodStart, end: config.periodEnd, status: "user_confirmed" }, originalPeriod: section.period, observedTransactionRange: section.observedTransactionRange, extraction: section.extraction };
+    batch.statements.push(coverage);
+    const mappingKey = statementSourceMappingKey(institution, section.account);
+    if (mappingKey) {
+      const known = next.statementMappings.some((item) => item.key === mappingKey && item.accountId === account.id);
+      if (!known) next.statementMappings.push({ key: mappingKey, accountId: account.id, confirmedAt: batch.createdAt, importBatchId: batch.id });
+    }
+    section.transactions.forEach((row, rowIndex) => {
+      const identity = statementObservationIdentity(input, section, row);
+      const prior = next.statementObservations.find((item) => item.id === identity);
+      if (prior) {
+        if (prior.accountId !== account.id || stableStatementStringify(prior.data) !== stableStatementStringify(row) || !next.transactions.some((tx) => tx.id === prior.transactionId)) errors.push(`Account ${sectionIndex + 1}, row ${rowIndex + 1}: source identity conflicts with an existing observation or its transaction is missing. Reconcile the changed evidence before import.`);
+        else batch.skippedCount += 1;
+        return;
+      }
+      const choice = config.rows?.[rowIndex] || {};
+      const factor = 10 ** window.ManimanStatement.currencyExponent(row.currency);
+      let transaction;
+      if (choice.linkTransactionId) {
+        transaction = statementMatchCandidates(row, account.id, next).find((item) => item.id === choice.linkTransactionId);
+        if (!transaction) return errors.push(`Account ${sectionIndex + 1}, row ${rowIndex + 1}: the selected existing transaction does not match this movement.`);
+        const existingLeg = next.statementObservations.filter((item) => item.transactionId === transaction.id && item.accountId === account.id && item.documentId === statementDocumentIdentity(input));
+        if (existingLeg.length) return errors.push(`Account ${sectionIndex + 1}, row ${rowIndex + 1}: two rows in the same document cannot be linked to the same account movement.`);
+        const movement = transaction.type === "transfer" ? transaction.toAccountId === account.id ? "credit" : "debit" : transaction.type === "income" ? "credit" : "debit";
+        if (movement !== row.direction) return errors.push(`Account ${sectionIndex + 1}, row ${rowIndex + 1}: debit/credit direction conflicts with the selected transaction.`);
+        batch.linkedCount += 1;
+      } else {
+        if (!["expense", "income", "transfer"].includes(choice.type)) return errors.push(`Account ${sectionIndex + 1}, row ${rowIndex + 1}: choose a transaction treatment or explicitly link an existing transaction.`);
+        if (choice.type === "expense" && row.direction !== "debit" || choice.type === "income" && row.direction !== "credit") return errors.push(`Account ${sectionIndex + 1}, row ${rowIndex + 1}: treatment conflicts with the statement direction.`);
+        let fromAccountId = account.id;
+        let toAccountId = "";
+        if (choice.type === "transfer") {
+          const other = next.accounts.find((item) => item.id === choice.toAccountId);
+          if (!other || other.id === account.id || other.currency && other.currency !== row.currency) return errors.push(`Account ${sectionIndex + 1}, row ${rowIndex + 1}: choose a different owned account with the same currency for this transfer.`);
+          fromAccountId = row.direction === "debit" ? account.id : other.id;
+          toAccountId = row.direction === "debit" ? other.id : account.id;
+        }
+        transaction = { id: uid("tx"), type: choice.type, amount: row.amountMinor / factor, amountMinor: row.amountMinor, currency: row.currency, date: row.transactionDate, description: row.description, category: choice.type === "transfer" ? "Transfer" : "Other", accountId: fromAccountId, toAccountId, note: "", tags: [], billId: null, importBatchId: batch.id, classificationStatus: "purpose_unassigned", paymentRail: row.hints?.paymentRail || "", statementEvidence: [] };
+        next.transactions.push(transaction);
+        batch.createdTransactionIds.push(transaction.id);
+      }
+      transaction.statementEvidence ||= [];
+      transaction.statementEvidence.push(identity);
+      next.statementObservations.push({ id: identity, documentId: statementDocumentIdentity(input), statementId: section.statementId, accountId: account.id, transactionId: transaction.id, importBatchId: batch.id, data: row });
+      batch.observationIds.push(identity);
+    });
+    if (configuration.options?.createCheckpoint !== false && section.balances?.closing && (!alreadyCovered || batch.observationIds.length > sectionObservationStart)) {
+      if (!["positive_asset_balance", "positive_liability_balance", "signed_balance"].includes(section.balances.signConvention)) {
+        errors.push(`Account ${sectionIndex + 1}: closing-balance sign is unknown. Disable balance checkpoints or correct the converter output.`);
+        return;
+      }
+      const closing = section.balances.closing;
+      const factor = 10 ** window.ManimanStatement.currencyExponent(currency);
+      const balance = section.balances.signConvention === "positive_liability_balance" ? -closing.amountMinor / factor : closing.amountMinor / factor;
+      account.balanceCheckpoints ||= [];
+      const existingCheckpoint = account.balanceCheckpoints.find((item) => item.date === closing.date && item.position === "end" && item.balance === balance);
+      if (!existingCheckpoint) {
+        const checkpoint = { id: uid("checkpoint"), date: closing.date, balance, position: closing.position === "start" ? "start" : "end", source: "bank_statement", note: "Reviewed statement closing balance", importBatchId: batch.id, statementOwned: true, statementBatchIds: [batch.id] };
+        account.balanceCheckpoints.push(checkpoint);
+        batch.checkpointIds.push(checkpoint.id);
+      } else {
+        existingCheckpoint.statementBatchIds ||= [];
+        existingCheckpoint.statementBatchIds.push(batch.id);
+        batch.checkpointIds.push(existingCheckpoint.id);
+      }
+    }
+  });
+  if (errors.length) return { valid: false, errors: [...new Set(errors)] };
+  batch.createdTransactionIds.forEach((id) => {
+    const transaction = next.transactions.find((item) => item.id === id);
+    batch.transactionSnapshots[id] = statementTransactionSnapshot(transaction);
+    transaction.statementOrigin = { importBatchId: batch.id, snapshot: batch.transactionSnapshots[id] };
+  });
+  const noChanges = batch.observationIds.length === 0 && addedCoverage === 0;
+  if (!noChanges) next.importBatches.push(batch);
+  return { valid: true, nextState: noChanges ? currentState : next, batch, noChanges, errors: [] };
+}
+
+function statementTransactionSnapshot(transaction) {
+  const { statementEvidence, statementOrigin, ...rest } = transaction;
+  return stableStatementStringify(rest);
+}
+
+function stableStatementStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStatementStringify).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStatementStringify(value[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+
+function undoStatementImportBatch(currentState, batchId) {
+  const next = JSON.parse(JSON.stringify(currentState));
+  const batch = (next.importBatches || []).find((item) => item.id === batchId && item.kind === "statement");
+  if (!batch) return next;
+  const observationsToRemove = new Set(batch.observationIds);
+  next.statementObservations = (next.statementObservations || []).filter((item) => !observationsToRemove.has(item.id));
+  next.transactions = next.transactions.filter((transaction) => {
+    transaction.statementEvidence = (transaction.statementEvidence || []).filter((id) => !observationsToRemove.has(id));
+    const createdByStatement = transaction.statementOrigin || batch.createdTransactionIds.includes(transaction.id);
+    if (!createdByStatement || transaction.statementEvidence.length) return true;
+    const snapshot = transaction.statementOrigin?.snapshot || batch.transactionSnapshots?.[transaction.id];
+    const unedited = snapshot === statementTransactionSnapshot(transaction);
+    if (!unedited) { transaction.importBatchId = ""; transaction.statementOrigin = null; }
+    return !unedited;
+  });
+  next.accounts.forEach((account) => {
+    account.balanceCheckpoints = (account.balanceCheckpoints || []).filter((item) => {
+      if (!batch.checkpointIds.includes(item.id)) return true;
+      item.statementBatchIds = (item.statementBatchIds || []).filter((id) => id !== batchId);
+      return !item.statementOwned || item.statementBatchIds.length > 0;
+    });
+  });
+  next.statementMappings = (next.statementMappings || []).filter((item) => item.importBatchId !== batchId || next.statementObservations.some((observation) => observation.accountId === item.accountId));
+  next.importBatches = next.importBatches.filter((item) => item.id !== batchId);
+  return next;
+}
+
+function setVaultOperationBusy(busy) {
+  vaultOperationDepth = Math.max(0, vaultOperationDepth + (busy ? 1 : -1));
+  const shell = document.querySelector(".shell");
+  if (shell) { shell.inert = vaultOperationDepth > 0 || !window.ManimanSecureStorage?.isUnlocked(); shell.setAttribute("aria-busy", String(vaultOperationDepth > 0)); }
+}
+
+async function commitPendingStatementImport() {
+  const pending = pendingStatementImport;
+  if (!pending || !window.ManimanSecureStorage?.isUnlocked()) return showToast("Unlock the encrypted vault before importing statements.");
+  const plan = buildStatementImportPlan(pending.document, state, pending);
+  if (!plan.valid) { pending.error = plan.errors.slice(0, 8).join(" "); render(); return; }
+  if (plan.noChanges) { clearStatementImport(); render(); showToast("Every source row was already imported. The ledger is unchanged."); return; }
+  const button = document.querySelector("#statementCommitBtn");
+  if (button) button.disabled = true;
+  setVaultOperationBusy(true);
+  try {
+    await window.ManimanSecureStorage.save(plan.nextState);
+    if (pendingStatementImport !== pending || !window.ManimanSecureStorage.isUnlocked()) return;
+    state = plan.nextState;
+    clearStatementImport();
+    render();
+    syncEncryptedState();
+    showToast(`${plan.batch.createdTransactionIds.length} transactions saved; ${plan.batch.linkedCount} existing transactions linked; ${plan.batch.skippedCount} source rows already present.`);
+  } catch (error) {
+    if (pendingStatementImport === pending) { pending.error = "Encrypted save failed. The current ledger is unchanged; retry after checking vault storage."; render(); }
+  } finally { setVaultOperationBusy(false); }
+}
+
 function importTransactionText(text, fileName = "", options = {}) {
+  if (vaultOperationDepth > 0) return showToast("Wait for the current vault operation to finish before importing another file.");
+  if (text.length > 20 * 1024 * 1024) return showToast("Import content must be 20 MB or smaller.");
+  try {
+    const value = JSON.parse(text);
+    if (isStatementEnvelope(value)) { stageStatementImport(value, options); return; }
+    if (value && typeof value === "object" && !Array.isArray(value) && Array.isArray(value.accounts)) return showToast("This is an app backup. Use Settings → Import backup instead of transaction upload.");
+  } catch (error) {
+    // Plain text and CSV are handled by the existing transaction parser below.
+  }
   const result = parseTransactionUpload(text, fileName, options);
   const { unique, skipped } = uniqueTransactions(result.transactions);
   const importBatchId = result.checkpoint && unique.length ? uid("import") : "";
@@ -3030,37 +3758,63 @@ function registerServiceWorker() {
   });
 }
 
-function exportData() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `maniman-${state.settings.selectedMonth}.json`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-  showToast("Export ready.");
+async function exportData() {
+  if (!window.ManimanSecureStorage?.isUnlocked()) return showToast("Unlock the vault before exporting its backup.");
+  const owner = captureVaultContext();
+  try {
+    await window.ManimanSecureStorage.flush();
+    if (!vaultContextMatches(owner)) return;
+    window.ManimanVaultAccess.downloadEnvelope(window.ManimanSecureStorage.getEnvelope());
+    showToast("Encrypted vault backup ready. Keep your passphrase or recovery key separately.");
+  } catch (_) { showToast("Encrypted export failed. Retry without closing this tab."); }
 }
 
 function importData(event) {
   const file = event.target.files?.[0];
   if (!file) return;
+  if (!window.ManimanSecureStorage?.isUnlocked()) {
+    event.target.value = "";
+    return showToast("Unlock the vault before importing a file.");
+  }
+  const owner = captureVaultContext();
+  if (file.size > 20 * 1024 * 1024) {
+    showToast("Import files must be 20 MB or smaller.");
+    event.target.value = "";
+    return;
+  }
 
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
+    let operationStarted = false;
     try {
-      state = normalizeState(JSON.parse(String(reader.result)));
+      if (!vaultContextMatches(owner)) return;
+      if (vaultOperationDepth > 0) return showToast("Wait for the current vault operation to finish before importing another file.");
+      const parsed = JSON.parse(String(reader.result));
+      if (window.ManimanVault?.isEnvelope(parsed)) {
+        showToast("To recover an encrypted backup, use Restore on an empty vault's unlock screen. The current vault is unchanged.");
+        return;
+      }
+      if (isStatementEnvelope(parsed)) {
+        stageStatementImport(parsed, { createCheckpoint: true });
+        return;
+      }
+      const next = prepareBackupState(parsed);
+      if (!window.confirm(`Replace this vault's ledger with ${parsed.transactions.length} transactions from the selected legacy backup? Export an encrypted backup first if you need to preserve current data.`)) return;
+      setVaultOperationBusy(true);
+      operationStarted = true;
+      await window.ManimanSecureStorage.save(next);
+      if (!vaultContextMatches(owner)) return;
+      state = next;
       activeView = state.settings.lastView || "dashboard";
       selectedActivityAccountId = state.accounts[0]?.id || "";
-      saveState();
-      showToast("Import complete.");
+      syncEncryptedState();
+      showToast("Legacy backup copied into encrypted storage.");
       render();
     } catch (error) {
-      console.error(error);
-      showToast("Import failed. Choose a valid JSON export.");
+      if (vaultContextMatches(owner)) showToast("Import rejected before replacement. Choose a supported single-currency Maniman backup with valid metadata.");
     } finally {
       event.target.value = "";
+      if (operationStarted) setVaultOperationBusy(false);
     }
   };
   reader.readAsText(file);
@@ -3167,7 +3921,7 @@ function emptyState(message) {
 }
 
 function formatMoney(value) {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat(state.settings.currency === "INR" ? "en-IN" : undefined, {
     style: "currency",
     currency: state.settings.currency,
     maximumFractionDigits: 2

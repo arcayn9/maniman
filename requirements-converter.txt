@@ -1,0 +1,3 @@
+# Optional PDF extraction dependencies. Text fixtures/tests use the standard library.
+# Reviewed against official PyPI metadata on 2026-11-17.
+pdfplumber==0.11.10
