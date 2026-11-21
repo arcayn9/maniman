@@ -1,0 +1,7 @@
+State Bank of India
+Account: XXXX4321
+Account Type: savings
+Statement From : 01-02-2026 to 28-02-2026
+Value Date | Post Date | Details | Ref No/Cheque No | ₹ Debit | ₹ Credit | Balance
+02/02/2026 | 03/02/2026 | UPI SYNTHETIC GROCER | SYNTHETIC-A | 123.45 | | 9,876.55
+04/02/2026 | 04/02/2026 | SYNTHETIC CREDIT | SYNTHETIC-B | | 500.00 | 10,376.55

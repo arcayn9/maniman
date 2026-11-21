@@ -1,7 +1,7 @@
 """Convert supported local statement tables to Maniman statement JSON.
 
-Supported profile: explicit column headers separated by pipes, tabs, or two or
-more spaces. Unknown layouts are review documents, never guessed transactions.
+Supported profiles: explicit delimited columns and ruled Value Date/Post Date
+grids. Unknown layouts are review documents, never guessed transactions.
 This module deliberately has no network or model-client dependencies.
 """
 
@@ -24,8 +24,10 @@ import sys
 from typing import Any
 
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 PROFILE = "generic-bank-columns-v1"
+VALUE_POST_PROFILE = "value-post-grid-v1"
+VALUE_POST_FIELDS = ["valueDate", "postingDate", "description", "reference", "debit", "credit", "balance"]
 MAX_BYTES = 25 * 1024 * 1024
 MAX_PAGES = 200
 MAX_CHARACTERS = 2_000_000
@@ -38,7 +40,7 @@ DATE_ANYWHERE = re.compile(DATE_TEXT)
 HEADER_ALIASES = {
     "date": "transactionDate", "txndate": "transactionDate", "transactiondate": "transactionDate",
     "trandate": "transactionDate", "valuedate": "valueDate", "postingdate": "postingDate",
-    "posteddate": "postingDate", "description": "description", "narration": "description",
+    "posteddate": "postingDate", "postdate": "postingDate", "description": "description", "narration": "description",
     "particulars": "description", "details": "description", "transactiondetails": "description",
     "debit": "debit", "debitamount": "debit", "debitamt": "debit", "withdrawal": "debit",
     "withdrawalamt": "debit", "withdrawalamount": "debit", "paidout": "debit", "dr": "debit",
@@ -49,6 +51,7 @@ HEADER_ALIASES = {
     "balance": "balance", "closingbalance": "balance", "runningbalance": "balance",
     "reference": "reference", "referenceno": "reference", "refno": "reference",
     "utr": "reference", "rrn": "reference", "transactionid": "reference", "chequeno": "reference",
+    "refnochequeno": "reference", "refnochequenumber": "reference",
 }
 
 
@@ -122,15 +125,79 @@ def split_cells(line: str) -> list[str]:
 
 
 def header_fields(line: str) -> list[str | None] | None:
-    fields = [HEADER_ALIASES.get(re.sub(r"[^a-z]", "", cell.lower())) for cell in split_cells(line)]
+    fields = [HEADER_ALIASES.get(re.sub(r"[^a-z]", "", re.sub(r"^(?:₹|rs\.?|inr)\s*", "", cell.lower()))) for cell in split_cells(line)]
     recognized_fields = [field for field in fields if field]
     if len(set(recognized_fields)) != len(recognized_fields):
         return None
-    if "transactionDate" not in fields or "description" not in fields:
+    if ("transactionDate" not in fields and fields != VALUE_POST_FIELDS) or "description" not in fields:
         return None
     if {"debit", "credit"}.issubset(fields) or {"amount", "direction"}.issubset(fields):
         return fields
     return None
+
+
+def ruled_value_post_page(page: Any, fallback: str, previous_columns: tuple | None) -> tuple[str, tuple | None]:
+    """Use an explicit seven-column grid, never narration/amount position guesses.
+
+    Keep blank cells and join wrapped text only inside a single PDF cell. A
+    headerless continuation is accepted only at the same column boundaries as
+    an already recognized table. Unrecognized content remains in the text path.
+    """
+    if len(page.edges) > 5000:
+        raise ConversionError("PDF page exceeds the local table-edge limit.")
+    accepted = []
+    columns = previous_columns
+    for table in sorted(page.find_tables(), key=lambda item: (item.bbox[1], item.bbox[0])):
+        rows = table.extract()
+        if not rows:
+            continue
+        normalized = [[re.sub(r"\s+", " ", cell or "").strip() for cell in row] for row in rows]
+        # The header may follow a merged title, but not arbitrary data rows.
+        header = next((i for i, row in enumerate(normalized[:8])
+                       if len(row) == 7 and header_fields(" | ".join(row)) == VALUE_POST_FIELDS), None)
+        if header is not None and any(DATE_AT_START.match(cell) for row in normalized[:header] for cell in row):
+            continue
+        first_row = table.rows[header if header is not None else 0].cells
+        geometry = tuple((round(cell[0], 1), round(cell[2], 1)) for cell in first_row if cell)
+        if len(geometry) != 7:
+            continue
+        if header is None and columns is None:
+            continue
+        incompatible = header is None and (geometry != columns or any(len(row) != 7 for row in normalized))
+        if header is not None:
+            columns = geometry
+        # Refuse overlapping recognized tables rather than dropping either.
+        if accepted and table.bbox[1] < accepted[-1][0].bbox[3]:
+            raise ConversionError("Overlapping statement tables require local review.")
+        lines = []
+        if header is None and not incompatible:
+            lines.append("Value Date | Post Date | Details | Ref No/Cheque No | Debit | Credit | Balance")
+        for row in normalized:
+            if any(row):
+                # A literal delimiter in a cell cannot change column identity.
+                lines.append("unsupported_table_content" if incompatible or any("|" in cell for cell in row) else " | ".join(row))
+        accepted.append((table, lines))
+    if not accepted:
+        return fallback, previous_columns
+
+    def band(top: float, bottom: float, outside: tuple | None = None) -> str:
+        def keep(obj: dict) -> bool:
+            y = (obj.get("top", -1) + obj.get("bottom", -1)) / 2
+            x = (obj.get("x0", -1) + obj.get("x1", -1)) / 2
+            return top <= y < bottom and (outside is None or x < outside[0] or x > outside[2])
+        return page.filter(keep).extract_text(layout=True) or ""
+
+    parts, cursor = [], page.bbox[1]
+    for table, lines in accepted:
+        parts.append(band(cursor, table.bbox[1]))
+        parts.extend(lines)
+        # Text beside a grid is retained as an exclusion, not silently erased.
+        side = band(table.bbox[1], table.bbox[3], table.bbox)
+        if side.strip():
+            parts.append("unsupported_table_content")
+        cursor = table.bbox[3]
+    parts.append(band(cursor, page.bbox[3]))
+    return "\n".join(parts), columns
 
 
 def extract_metadata(pages: list[str], currency_override: str | None) -> tuple[dict, dict, dict, str | None, list[dict]]:
@@ -147,6 +214,8 @@ def extract_metadata(pages: list[str], currency_override: str | None) -> tuple[d
         bank = re.match(r"^(?:bank(?: name)?|institution)\s*:\s*(.{2,100})$", line, flags=re.I)
         if bank:
             institution_names.append((page, bank.group(1).strip(), line))
+        elif re.fullmatch(r"State\s+Bank\s+of\s+India", line, flags=re.I):
+            institution_names.append((page, "State Bank of India", line))
         elif re.fullmatch(r"[A-Za-z][A-Za-z .&'-]{1,90}\bBank(?: Limited| Ltd\.?)?", line, flags=re.I):
             institution_names.append((page, line, line))
         account = re.match(r"^(?:account(?: number| no\.?| identifier)?|card(?: number| no\.?)?)\s*:\s*(.+)$", line, flags=re.I)
@@ -160,6 +229,9 @@ def extract_metadata(pages: list[str], currency_override: str | None) -> tuple[d
         currency = re.match(r"^currency\s*:\s*([A-Z]{3})\s*$", line, flags=re.I)
         if currency:
             currencies.add(currency.group(1).upper())
+        # Paired currency-labeled amount columns are explicit currency evidence.
+        if header_fields(line) and re.search(r"(?:₹|\bINR\b|\bRs\.?)\s*Debit", line, re.I) and re.search(r"(?:₹|\bINR\b|\bRs\.?)\s*Credit", line, re.I):
+            currencies.add("INR")
         kind = re.match(r"^account type\s*:\s*(savings|current|checking|credit card|wallet|cash)\s*$", line, flags=re.I)
         if kind:
             kind_values.add(kind.group(1).lower().replace(" ", "_"))
@@ -234,7 +306,8 @@ def parse_transaction(cells: list[str], fields: list[str | None], currency: str,
     if len(cells) != len(fields):
         raise ValueError("column_count_mismatch")
     row = {field: value for field, value in zip(fields, cells) if field}
-    date = parse_date(row.get("transactionDate", ""))
+    # Posting is the booking date; value date remains a separate source field.
+    date = parse_date(row.get("transactionDate") or row.get("postingDate", ""))
     description = row.get("description", "").strip()
     if not description:
         raise ValueError("missing_description")
@@ -278,6 +351,7 @@ def convert_pages(pages: list[str], fingerprint: str, extraction_method: str = "
     transactions, excluded = [], []
     fields = None
     recognized = False
+    value_post = False
     candidate_count = 0
     for page, text in enumerate(pages, start=1):
         for row_number, raw_line in enumerate(text.splitlines(), start=1):
@@ -287,6 +361,7 @@ def convert_pages(pages: list[str], fingerprint: str, extraction_method: str = "
             new_fields = header_fields(raw_line)
             if new_fields:
                 fields, recognized = new_fields, True
+                value_post = value_post or fields == VALUE_POST_FIELDS
                 continue
             if not DATE_AT_START.match(line):
                 # Unsupported continuations or damaged dates must not disappear.
@@ -294,7 +369,7 @@ def convert_pages(pages: list[str], fingerprint: str, extraction_method: str = "
                     continue
                 if re.fullmatch(r"[-_=+|\s]+", line) or re.fullmatch(r"Page\s+\d+(?:\s+of\s+\d+)?", line, re.I):
                     continue
-                if re.match(r"^(?:Bank(?: Name)?|Institution|Account(?: Type| Number| No\.?)?|Card(?: Number| No\.?)?|Currency|Statement Period|Period|Opening Balance|Closing Balance)\s*:", line, re.I):
+                if line == (institution.get("evidence") or {}).get("text") or re.match(r"^(?:Bank(?: Name)?|Institution|Account(?: Type| Number| No\.?)?|Card(?: Number| No\.?)?|Currency|Statement Period|Statement From|Period|Opening Balance|Closing Balance)\s*:", line, re.I):
                     continue
                 candidate_count += 1
                 excluded.append({"sourceLocation": {"page": page, "row": row_number},
@@ -340,7 +415,7 @@ def convert_pages(pages: list[str], fingerprint: str, extraction_method: str = "
         "format": "maniman.statement", "schemaVersion": "1.0",
         "source": {"documentId": document_id, "documentFingerprint": document_id,
                    "converter": "maniman-statement-converter", "converterVersion": VERSION,
-                   "profile": PROFILE if recognized else "unknown", "extractionMethod": extraction_method,
+                   "profile": VALUE_POST_PROFILE if value_post else PROFILE if recognized else "unknown", "extractionMethod": extraction_method,
                    "pageCount": len(pages), "synthetic": False},
         "institution": institution,
         "statements": [{"statementId": document_id + ":s1", "sourceKind": "card_statement" if account["kind"] == "credit_card" else "bank_statement", "account": account,
@@ -363,6 +438,7 @@ def read_pdf_pages(data: bytes, password: str | None, ocr: bool, max_pages: int)
     except Exception:
         raise ConversionError("PDF could not be opened. Check the document and use --ask-password if it is protected.") from None
     pages, used_ocr, used_text = [], False, False
+    previous_columns = None
     try:
         if len(document.pages) > max_pages:
             raise ConversionError("PDF exceeds the configured page limit.")
@@ -391,6 +467,7 @@ def read_pdf_pages(data: bytes, password: str | None, ocr: bool, max_pages: int)
                 used_ocr = True
             else:
                 used_text = True
+                text, previous_columns = ruled_value_post_page(page, text, previous_columns)
             pages.append(text)
             if sum(map(len, pages)) > MAX_CHARACTERS:
                 raise ConversionError("Extracted text exceeds the local resource limit.")

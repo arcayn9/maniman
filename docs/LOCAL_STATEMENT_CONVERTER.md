@@ -32,7 +32,7 @@ The converter refuses an existing output path and creates a new output file with
 
 ## Supported profile and limits
 
-The initial deterministic profile is **generic-bank-columns-v1**, not a claim of universal HDFC/ICICI/SBI/card support. It recognizes explicit headers separated by pipes, tabs or two or more spaces:
+The converter has two deterministic profiles: **generic-bank-columns-v1** and **value-post-grid-v1**. These are tested layouts, not universal HDFC/ICICI/SBI/card support. The generic profile recognizes explicit headers separated by pipes, tabs or two or more spaces:
 
 ```text
 Bank: Example Bank
@@ -46,11 +46,25 @@ Date | Description | Debit | Credit | Balance | Reference
 
 Date/description and either separate debit/credit columns or amount/direction columns are required. Bank-style header aliases such as Narration, Withdrawal, Deposit, Txn Date and Running Balance are supported. Optional labeled opening/closing balances are checked against extracted movements when the sign convention is known. Dates are ISO or explicitly day-first with a four-digit year. An unrecognized or wrapped table row becomes an exclusion requiring review instead of silently disappearing.
 
+### Value Date / Post Date grid profile
+
+Version 0.2.0 adds the seven-column layout from the cropped reference screenshot:
+
+```text
+Value Date | Post Date | Details | Ref No/Cheque No | ₹ Debit | ₹ Credit | Balance
+```
+
+For ruled, selectable-text PDFs, the converter reads cell boundaries to preserve empty debit/credit cells and joins wrapped header, narration and reference text within each cell. It handles repeated headers and headerless continuation tables only when their seven column boundaries match an already recognized table. Unknown grids, orphan wrapped rows, literal pipe characters inside cells and ambiguous movements remain exclusions requiring review. It does not guess direction from the running balance. Borderless/OCR variants still need separate layout validation.
+
+**Post Date becomes transactionDate** (the ledger booking date); both postingDate and valueDate are retained. Paired ₹/INR/Rs debit and credit headings supply explicit INR evidence; conflicting overrides are rejected. The standalone text “State Bank of India” is recognized only when present in the extracted document. The layout or filename does not establish bank identity; missing bank/account details must be supplied in the app review. Statement From supplies declared coverage independently of transaction dates.
+
+The profile was built and tested using invented text and real synthetic grid PDFs. The private PDF was not read, and existing private JSON output was not modified. Rerun locally with the same input and password/OCR flags but a **new output filename**; existing output is never overwritten. If extraction remains partial/failed, preserve that result and share only sanitized diagnostic codes or synthetic layout examples. Source locations identify page and normalized logical row, rather than the original visual text-line number.
+
 Institution, account kind, masked identifier and declared period come from explicit headers. Missing metadata stays null/unknown; the converter never substitutes transaction bounds for statement coverage. It exports at most the last four account digits. Multiple account sections, conflicting currencies and ambiguous account types are rejected for local splitting/review; multi-account documents require a future dedicated profile. The JSON contract itself can represent multiple statement sections.
 
 Every candidate transaction row is either extracted or recorded in `excludedRows` with a page/row and reason. Unsupported layouts and zero extraction generate a failed review document, not an apparently complete empty statement. Source hashes and page/row observation IDs support repeat imports; cross-source identity still requires Maniman reconciliation.
 
-Resource limits: 25 MiB input, 200 pages (lower with `--max-pages`), two million extracted characters, a page-dimension check before text layout/rendering, 40 million OCR pixels per page and a 45-second OCR subprocess timeout. PDF parsing itself runs in the local process; use trusted local files and keep PDF dependencies updated. Files, paths, content and instructions inside statements are never executed. Future bank profiles should be tested against sanitized fixtures before being advertised as supported.
+Resource limits: 25 MiB input, 200 pages (lower with `--max-pages`), two million extracted characters, a page-dimension check before text layout/rendering, 40 million OCR pixels per page a 5,000-edge limit before ruled-table detection, and a 45-second OCR subprocess timeout. PDF parsing itself runs in the local process; use trusted local files and keep PDF dependencies updated. Files, paths, content and instructions inside statements are never executed. Future bank profiles should be tested against sanitized fixtures before being advertised as supported.
 
 ## Implementation and validation
 
@@ -59,4 +73,4 @@ Resource limits: 25 MiB input, 200 pages (lower with `--max-pages`), two million
 - Tests: synthetic text fixtures, exact minor units, missing coverage/currency, invalid/ambiguous rows, multi-account refusal, stable evidence IDs, CLI permissions/no-overwrite/privacy, and real PDF extraction when the optional dependency is installed.
 - This script emits extraction observations only. Maniman assigns the user's vault/account, classifies transactions and reconciles duplicates/transfers. A source account identifier never authorizes access to another user's data.
 
-Dependency reference: [pdfplumber's official documentation](https://github.com/jsvine/pdfplumber) and [official package metadata](https://pypi.org/project/pdfplumber/) were checked on 2026-11-17. The direct PDF dependency is pinned in `requirements-converter.txt`; `requirements-converter.lock` records the verified transitive environment. Retest the lock on each supported Python/platform combination.
+Dependency reference: [pdfplumber's official documentation](https://github.com/jsvine/pdfplumber) and [official package metadata](https://pypi.org/project/pdfplumber/) were checked on 2026-11-17; the table extraction/cell APIs were rechecked on 2026-11-21. The direct PDF dependency is pinned in `requirements-converter.txt`; `requirements-converter.lock` records the verified transitive environment. Retest the lock on each supported Python/platform combination.

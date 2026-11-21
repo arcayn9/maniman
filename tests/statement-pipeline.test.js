@@ -7,11 +7,14 @@ const vm = require("node:vm");
 const { spawnSync } = require("node:child_process");
 const vault = require("../lib/secure-storage.js");
 
-test("local converter JSON flows through reviewed import, encrypted persistence, reload and undo", async () => {
+for (const scenario of [
+  { fixture: "synthetic-bank.txt", amounts: [80000, 2000000] },
+  { fixture: "synthetic-value-post.txt", amounts: [12345, 50000] }
+]) test(`local converter ${scenario.fixture} flows through reviewed import, encrypted persistence, reload and undo`, async () => {
   const root = path.resolve(__dirname, "..");
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "maniman-pipeline-"));
   const output = path.join(temp, "statement.json");
-  const process = spawnSync("python3", ["-m", "tools.statement_converter", "tests/fixtures/converter/synthetic-bank.txt", "--text-input", "-o", output], { cwd: root, encoding: "utf8" });
+  const process = spawnSync("python3", ["-m", "tools.statement_converter", `tests/fixtures/converter/${scenario.fixture}`, "--text-input", "-o", output], { cwd: root, encoding: "utf8" });
   assert.equal(process.status, 0, process.stderr);
   const source = JSON.parse(fs.readFileSync(output, "utf8"));
   const context = vm.createContext({ console, document: { addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; } }, setTimeout() {}, clearTimeout() {} });
@@ -28,8 +31,11 @@ test("local converter JSON flows through reviewed import, encrypted persistence,
   })()`, context));
   assert.equal(plan.valid, true, JSON.stringify(plan.errors));
   assert.equal(plan.nextState.transactions.length, 2);
-  assert.equal(plan.nextState.transactions[0].amountMinor, 80000);
-  assert.equal(plan.nextState.transactions[1].amountMinor, 2000000);
+  assert.deepEqual(plan.nextState.transactions.map((tx) => tx.amountMinor), scenario.amounts);
+  if (scenario.fixture === "synthetic-value-post.txt") {
+    assert.equal(plan.nextState.transactions[0].date, "2026-02-03");
+    assert.equal(source.statements[0].transactions[0].valueDate, "2026-02-02");
+  }
   const values = new Map();
   const manager = vault.createManager({ async get(key) { return values.get(key); }, async set(key, value) { values.set(key, structuredClone(value)); } });
   await manager.begin();
