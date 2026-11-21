@@ -1,0 +1,1 @@
+Selected inline SVG navigation and common-action icons from lucide-static 1.77.0, npm package https://registry.npmjs.org/lucide-static/-/lucide-static-1.77.0.tgz. License: lucide-LICENSE. No runtime network requests.

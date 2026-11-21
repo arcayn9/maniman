@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://maniman.local/schemas/statement-v1.schema.json",
+  "title": "Maniman statement document version 1.0",
+  "$comment": "Structural validation is supplemented by lib/statement-contract.js for calendar dates, currency support, unique identities, row accounting and evidenced balance arithmetic.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "schemaVersion", "source", "institution", "statements", "issues"],
+  "properties": {
+    "format": { "const": "maniman.statement" },
+    "schemaVersion": { "const": "1.0" },
+    "source": { "$ref": "#/$defs/source" },
+    "institution": { "$ref": "#/$defs/institution" },
+    "statements": {
+      "type": "array", "minItems": 1, "maxItems": 1000,
+      "items": { "$ref": "#/$defs/statement" }
+    },
+    "issues": { "$ref": "#/$defs/issues" }
+  },
+  "$defs": {
+    "text": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "\\S" },
+    "nullableText": { "anyOf": [{ "$ref": "#/$defs/text" }, { "type": "null" }] },
+    "date": { "type": "string", "format": "date", "pattern": "^(?!0000)\\d{4}-\\d{2}-\\d{2}$" },
+    "nullableDate": { "anyOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] },
+    "minorUnits": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$", "$comment": "The semantic validator additionally rejects currencies unsupported by the current runtime." },
+    "status": { "enum": ["extracted", "unknown", "user_confirmed"] },
+    "location": {
+      "type": "object", "required": ["page"],
+      "properties": {
+        "page": { "type": "integer", "minimum": 1 },
+        "row": { "type": "integer", "minimum": 1 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 16000, "pattern": "\\S" }
+      }
+    },
+    "issue": {
+      "type": "object", "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "\\S" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 4000, "pattern": "\\S" },
+        "severity": { "enum": ["info", "warning", "error"] },
+        "path": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "\\S" }
+      }
+    },
+    "issues": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/issue" } },
+    "source": {
+      "type": "object",
+      "required": ["documentId", "converter", "converterVersion", "profile", "extractionMethod", "pageCount"],
+      "properties": {
+        "documentId": { "$ref": "#/$defs/text" },
+        "documentFingerprint": { "type": ["string", "null"], "minLength": 1, "maxLength": 256, "pattern": "\\S" },
+        "converter": { "$ref": "#/$defs/text" },
+        "converterVersion": { "$ref": "#/$defs/text" },
+        "profile": { "$ref": "#/$defs/text" },
+        "extractionMethod": { "enum": ["pdf_text", "local_ocr", "ocr", "mixed", "text_input", "manual", "structured_data", "unknown"] },
+        "pageCount": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "synthetic": { "type": "boolean" }
+      }
+    },
+    "institution": {
+      "type": "object", "required": ["status"],
+      "properties": {
+        "name": { "type": ["string", "null"], "minLength": 1, "maxLength": 200, "pattern": "\\S" },
+        "code": { "type": ["string", "null"], "minLength": 1, "maxLength": 128, "pattern": "\\S" },
+        "country": { "type": ["string", "null"], "pattern": "^[A-Z]{2}$" },
+        "status": { "$ref": "#/$defs/status" },
+        "evidence": { "anyOf": [{ "$ref": "#/$defs/location" }, { "type": "null" }] }
+      }
+    },
+    "account": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": ["string", "null"], "minLength": 1, "maxLength": 80, "pattern": "\\S" },
+        "maskedIdentifier": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "\\S", "not": { "pattern": "^[0-9][0-9\\s-]{6,}$" } }
+          ]
+        },
+        "currency": { "anyOf": [{ "$ref": "#/$defs/currency" }, { "type": "null" }] }
+      }
+    },
+    "period": {
+      "type": "object", "required": ["status"],
+      "properties": {
+        "start": { "$ref": "#/$defs/nullableDate" },
+        "end": { "$ref": "#/$defs/nullableDate" },
+        "status": { "$ref": "#/$defs/status" },
+        "evidence": { "anyOf": [{ "$ref": "#/$defs/location" }, { "type": "null" }] }
+      }
+    },
+    "observedRange": {
+      "type": "object",
+      "properties": { "start": { "$ref": "#/$defs/nullableDate" }, "end": { "$ref": "#/$defs/nullableDate" } }
+    },
+    "balance": {
+      "type": "object", "required": ["date", "amountMinor", "position"],
+      "properties": {
+        "date": { "$ref": "#/$defs/date" },
+        "amountMinor": { "$ref": "#/$defs/minorUnits" },
+        "position": { "enum": ["start", "end"] }
+      }
+    },
+    "balances": {
+      "type": "object", "required": ["signConvention"],
+      "properties": {
+        "signConvention": { "enum": ["positive_asset_balance", "positive_liability_balance", "signed_balance", "unknown"] },
+        "opening": { "anyOf": [{ "$ref": "#/$defs/balance" }, { "type": "null" }] },
+        "closing": { "anyOf": [{ "$ref": "#/$defs/balance" }, { "type": "null" }] }
+      }
+    },
+    "excludedRow": {
+      "type": "object", "required": ["reason"],
+      "properties": {
+        "reason": { "type": "string", "minLength": 1, "maxLength": 4000, "pattern": "\\S" },
+        "sourceLocation": { "$ref": "#/$defs/location" }
+      }
+    },
+    "extraction": {
+      "type": "object", "required": ["status", "transactionRowCount", "excludedRows", "issues"],
+      "properties": {
+        "status": { "enum": ["complete", "partial", "failed"] },
+        "transactionRowCount": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "excludedRows": { "type": "array", "items": { "$ref": "#/$defs/excludedRow" } },
+        "issues": { "$ref": "#/$defs/issues" }
+      }
+    },
+    "reference": {
+      "type": "object", "required": ["type", "value"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "\\S" },
+        "value": { "$ref": "#/$defs/text" }
+      }
+    },
+    "hints": {
+      "type": "object",
+      "properties": {
+        "paymentRail": { "$ref": "#/$defs/nullableText" },
+        "transactionApp": { "$ref": "#/$defs/nullableText" },
+        "counterparty": { "$ref": "#/$defs/nullableText" }
+      }
+    },
+    "transaction": {
+      "type": "object",
+      "required": ["observationId", "transactionDate", "description", "direction", "amountMinor", "currency", "references", "sourceLocation", "issues"],
+      "properties": {
+        "observationId": { "$ref": "#/$defs/text" },
+        "sourceTransactionId": { "$ref": "#/$defs/nullableText" },
+        "transactionDate": { "$ref": "#/$defs/date" },
+        "postingDate": { "$ref": "#/$defs/nullableDate" },
+        "valueDate": { "$ref": "#/$defs/nullableDate" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 16000, "pattern": "\\S" },
+        "direction": { "enum": ["debit", "credit"] },
+        "amountMinor": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "currency": { "$ref": "#/$defs/currency" },
+        "runningBalanceMinor": { "anyOf": [{ "$ref": "#/$defs/minorUnits" }, { "type": "null" }] },
+        "references": { "type": "array", "items": { "$ref": "#/$defs/reference" } },
+        "hints": { "$ref": "#/$defs/hints" },
+        "sourceLocation": { "$ref": "#/$defs/location" },
+        "issues": { "$ref": "#/$defs/issues" }
+      }
+    },
+    "statement": {
+      "type": "object",
+      "required": ["statementId", "sourceKind", "account", "period", "extraction", "transactions"],
+      "properties": {
+        "statementId": { "$ref": "#/$defs/text" },
+        "sourceKind": { "enum": ["bank_statement", "card_statement", "wallet_statement", "payment_app_statement", "other", "unknown"] },
+        "account": { "$ref": "#/$defs/account" },
+        "period": { "$ref": "#/$defs/period" },
+        "observedTransactionRange": { "anyOf": [{ "$ref": "#/$defs/observedRange" }, { "type": "null" }] },
+        "balances": { "anyOf": [{ "$ref": "#/$defs/balances" }, { "type": "null" }] },
+        "extraction": { "$ref": "#/$defs/extraction" },
+        "transactions": { "type": "array", "maxItems": 100000, "items": { "$ref": "#/$defs/transaction" } }
+      }
+    }
+  }
+}

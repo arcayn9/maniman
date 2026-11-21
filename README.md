@@ -2,17 +2,45 @@
 
 A mobile-first, local-friendly money manager inspired by the quick-entry flow of Rolly.
 
+## User’s Guide
+
+Open **User’s Guide** in the desktop sidebar or the mobile three-line App menu. Search its step-by-step instructions for setup, accounts, transactions, imports, reports, budgets, goals, bills, backups and recovery. An offline-readable copy is in [the User’s Guide](docs/USER_GUIDE.md). Guide content lives in `lib/user-guide.js`; regenerate the Markdown copy with `npm run docs:guide`.
+
 ## Run Locally
 
-For one-device use, open `index.html` in a browser.
-
-For phone plus laptop use, run the local server from this folder:
+Run the local server from this folder (Node 22 or later):
 
 ```sh
 node server.js
 ```
 
-Then visit `http://127.0.0.1:4173` on the laptop. The server prints LAN URLs you can open from your phone when both devices are on the same network.
+Then visit `http://127.0.0.1:4173`. Create a vault passphrase, save the generated recovery key separately, and complete the recovery check. Subsequent sessions unlock the existing vault. HTTPS or localhost and a browser with Web Crypto/IndexedDB are required.
+
+The server binds to loopback by default. Non-loopback hosting requires `MANIMAN_LOCAL_TOKEN`; use HTTPS for browser encryption on other devices. Hosted phone/laptop use remains part of the plan; initial encrypted cloud-sync code still needs live two-device/RLS verification. See [implementation status](docs/IMPLEMENTATION_STATUS.md).
+
+## Local PDF conversion and statement JSON import
+
+The first implementation increment adds a local converter, a versioned statement contract, a staged importer, and encrypted persistence. The converter currently supports a tested generic explicit-column bank layout; it does not yet claim support for every bank PDF.
+
+```sh
+python3 -m venv .venv-converter
+.venv-converter/bin/python -m pip install -r requirements-converter.lock
+mkdir -p private-statements
+.venv-converter/bin/python -m tools.statement_converter private-statements/statement.pdf -o private-statements/statement.json
+```
+
+Use `--ask-password` for protected PDFs or `--ocr` for local OCR (requires local Tesseract). Unknown layouts and incomplete/OCR extraction produce a review document; correct the extraction locally before Maniman will commit it. No cloud conversion/model fallback is used.
+
+In Maniman, select `Imports & review` and choose the statement JSON file. Review bank details, account mapping or creation, declared statement dates and every row's treatment. Confirm the review to save the batch into the encrypted vault. Reimports preserve source identity; import history supports undo without removing manually edited or independently supported transactions. The initial reporting path allows one currency per vault.
+
+Statement files are read locally in the browser. Ordinary converter JSON remains sensitive plaintext outside the vault. Do not commit real statements or conversion outputs to Git; `private-statements/` is ignored for local working files. See the [converter guide](docs/LOCAL_STATEMENT_CONVERTER.md), [JSON format](docs/STATEMENT_JSON_FORMAT.md), and [vault guide](docs/SECURE_VAULT.md).
+
+Run verification:
+
+```sh
+npm test
+.venv-converter/bin/python -m unittest discover -s tests -p 'test_*.py' -v
+```
 
 ## What It Does
 
@@ -29,14 +57,14 @@ Then visit `http://127.0.0.1:4173` on the laptop. The server prints LAN URLs you
 - Savings goals
 - Recurring bill tracking with paid/unpaid status
 - JSON import and export
-- Browser `localStorage` persistence when opened statically
-- Shared local JSON persistence when run through `server.js`
+- Encrypted IndexedDB persistence with session unlock and recovery-key support
+- Optional encrypted local-server snapshot persistence
 
-No cloud account is required for local use. The local server stores data in `data/maniman-state.json`.
+No cloud account is required for local use. The local server stores encrypted snapshots in `data/maniman.vault.json`. Previous plaintext state files remain untouched and are no longer served over HTTP. To migrate a legacy file, create/unlock the vault and explicitly import the existing JSON backup. Export and verify an encrypted backup before cleaning up legacy files or historical copies.
 
 ## Bulk Transaction Imports
 
-Open `Transactions -> Bulk upload` to import multiple entries at once. Choose the default account first, then paste text or upload a `.txt`, `.csv`, or `.json` file.
+Open `Imports & review` to import multiple entries at once. For ordinary text/CSV/transaction-list JSON, choose the default account first. Versioned statement JSON uses its separate bank/account/period review flow. Whole-vault backup restoration is distinct from statement import.
 
 For bank statements with a running balance column, keep `Statement balance` set to `Use latest balance as checkpoint`. Maniman will import the transactions and save the latest statement balance as a trusted checkpoint for that account.
 
@@ -112,16 +140,10 @@ latest checkpoint balance + transactions after that checkpoint
 
 This prevents older imported transactions from accidentally changing today's real balance. New accounts create a starting checkpoint from the opening balance and date. You can also add a manual checkpoint from `Accounts -> Balance checkpoint`.
 
-## Interim Cloud Mode
+## Cloudflare hosting
 
-Maniman can also run as an installable PWA with optional Supabase cloud sync for the period before a spare local server is available.
+For the Workers build shown in the current deployment logs, use the [Cloudflare deployment guide](docs/CLOUDFLARE_DEPLOYMENT.md). `npm run build` packages only public assets into `dist` and generates browser config from `SUPABASE_URL` plus `SUPABASE_PUBLISHABLE_KEY` (or the existing `SUPABASE_ANON_KEY`). Wrangler runs that build before deploy/version upload.
 
-1. Create a Supabase project.
-2. Run the SQL from `docs/INTERIM_MOBILE_FIRST_CLOUD_PLAN.md`.
-3. Add the public Supabase URL and anon key to `config.js`.
-4. Host the folder with Cloudflare Pages or any static host.
-5. Open Settings, create/sign into an account, and sync.
+Set the Cloudflare build command to `npm run build`, the production deploy command to `npm run deploy`, and the non-production version upload command to `npm run preview:upload`. Validate without uploading with `npm run deploy:check`. Deploy `dist`, never the full repository directory.
 
-The Supabase anon key is safe to use in the browser only when Row Level Security is enabled. Do not put service-role keys in `config.js`.
-
-When using `server.js`, the local server stores new data in `data/maniman-state.json` and can still read the old `data/pocket-pilot-state.json` if it exists.
+Cloud state is an encrypted vault envelope. The [vault guide](docs/SECURE_VAULT.md) describes recovery and owner boundaries. Hosted RLS/auth and two-device enrollment/conflict recovery still need live validation; this deployment fix does not change the database or merge private vaults. The older [interim cloud plan](docs/INTERIM_MOBILE_FIRST_CLOUD_PLAN.md) is historical and describes the superseded plaintext storage model.

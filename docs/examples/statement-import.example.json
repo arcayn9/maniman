@@ -1,0 +1,98 @@
+{
+  "format": "maniman.statement",
+  "schemaVersion": "1.0",
+  "source": {
+    "documentId": "synthetic-document-001",
+    "documentFingerprint": null,
+    "converter": "maniman-statement-converter",
+    "converterVersion": "0.1.0",
+    "profile": "synthetic-bank-example-v1",
+    "extractionMethod": "pdf_text",
+    "pageCount": 1,
+    "synthetic": true
+  },
+  "institution": {
+    "name": "Example Bank",
+    "code": null,
+    "country": "IN",
+    "status": "extracted",
+    "evidence": {
+      "page": 1,
+      "text": "Example Bank — Account Statement"
+    }
+  },
+  "statements": [
+    {
+      "statementId": "synthetic-statement-001",
+      "sourceKind": "bank_statement",
+      "account": {
+        "kind": "savings",
+        "maskedIdentifier": "XXXX1234",
+        "currency": "INR"
+      },
+      "period": {
+        "start": "2026-10-01",
+        "end": "2026-10-31",
+        "status": "extracted",
+        "evidence": {
+          "page": 1,
+          "text": "Statement period: 01/10/2026 to 31/10/2026"
+        }
+      },
+      "observedTransactionRange": {
+        "start": "2026-10-05",
+        "end": "2026-10-05"
+      },
+      "balances": {
+        "signConvention": "positive_asset_balance",
+        "opening": {
+          "date": "2026-10-01",
+          "amountMinor": 1000000,
+          "position": "start"
+        },
+        "closing": {
+          "date": "2026-10-31",
+          "amountMinor": 920000,
+          "position": "end"
+        }
+      },
+      "extraction": {
+        "status": "complete",
+        "transactionRowCount": 1,
+        "excludedRows": [],
+        "issues": []
+      },
+      "transactions": [
+        {
+          "observationId": "synthetic-document-001:p1:r1",
+          "sourceTransactionId": null,
+          "transactionDate": "2026-10-05",
+          "postingDate": "2026-10-05",
+          "valueDate": null,
+          "description": "UPI/EXAMPLE GROCER/SYNTHETIC-REF-001",
+          "direction": "debit",
+          "amountMinor": 80000,
+          "currency": "INR",
+          "runningBalanceMinor": 920000,
+          "references": [
+            {
+              "type": "bank_reference",
+              "value": "SYNTHETIC-REF-001"
+            }
+          ],
+          "hints": {
+            "paymentRail": "UPI",
+            "transactionApp": null,
+            "counterparty": "Example Grocer"
+          },
+          "sourceLocation": {
+            "page": 1,
+            "row": 1
+          },
+          "issues": []
+        }
+      ]
+    }
+  ],
+  "issues": []
+}

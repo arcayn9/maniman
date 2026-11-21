@@ -1,0 +1,2 @@
+# Keep the pinned upstream SDK byte-for-byte; its template literals contain whitespace.
+vendor/supabase-2.119.0.js -whitespace

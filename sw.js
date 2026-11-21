@@ -1,11 +1,16 @@
-const CACHE_NAME = "maniman-shell-v4";
+const CACHE_NAME = "maniman-shell-v11";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./manifest.webmanifest",
-  "./icons/maniman-icon.svg"
+  "./icons/maniman-icon.svg",
+  "./lib/statement-contract.js",
+  "./lib/secure-storage.js",
+  "./lib/vault-access.js",
+  "./lib/user-guide.js",
+  "./vendor/supabase-2.119.0.js"
 ];
 
 self.addEventListener("install", (event) => {
@@ -17,7 +22,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) => Promise.all(
-      keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+      keys.filter((key) => (key.startsWith("maniman-") || key.startsWith("pocket-pilot-")) && key !== CACHE_NAME).map((key) => caches.delete(key))
     )).then(() => self.clients.claim())
   );
 });
@@ -25,20 +30,11 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin) return;
-  if (url.pathname.endsWith("/config.js")) {
-    event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
-    return;
-  }
-
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return response;
-      });
-    })
-  );
+  if (url.origin !== self.location.origin || url.search || url.pathname.startsWith("/api/") || url.pathname.endsWith("/config.js")) return;
+  const allowed = new Set(APP_SHELL.map((item) => new URL(item, self.registration.scope).href));
+  if (!allowed.has(url.href)) return;
+  event.respondWith(fetch(event.request).then((response) => {
+    if (response.ok) event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone())));
+    return response;
+  }).catch(() => caches.match(event.request)));
 });

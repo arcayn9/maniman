@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#0f766e">
+    <meta name="theme-color" content="#18315b">
     <meta name="description" content="Maniman is a local-first, mobile-first money manager.">
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icons/maniman-icon.svg" type="image/svg+xml">
@@ -11,108 +11,56 @@
     <title>Maniman - Money Manager</title>
     <link rel="stylesheet" href="styles.css">
     <script src="config.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="vendor/supabase-2.119.0.js"></script>
+    <script src="lib/statement-contract.js"></script>
+    <script src="lib/secure-storage.js"></script>
+    <script src="lib/vault-access.js"></script>
+    <script src="lib/user-guide.js"></script>
   </head>
   <body>
+    <a class="skip-link" href="#mainContent">Skip to content</a>
     <div class="shell">
       <aside class="sidebar" aria-label="App navigation">
-        <div class="brand">
-          <div class="brand-mark" aria-hidden="true">MM</div>
-          <div>
-            <strong>Maniman</strong>
-            <span>Mobile money manager</span>
-          </div>
-        </div>
-
+        <a class="brand" href="./" aria-label="Maniman home"><div class="brand-mark" aria-hidden="true"><img src="icons/maniman-icon.svg" alt="" width="40" height="40"></div><div><strong>Maniman</strong></div></a>
         <nav class="nav-list" aria-label="Primary">
-          <button class="nav-item is-active" type="button" data-view="dashboard">
-            <span aria-hidden="true">D</span>
-            Dashboard
-          </button>
-          <button class="nav-item" type="button" data-view="transactions">
-            <span aria-hidden="true">T</span>
-            Transactions
-          </button>
-          <button class="nav-item" type="button" data-view="budgets">
-            <span aria-hidden="true">B</span>
-            Budgets
-          </button>
-          <button class="nav-item" type="button" data-view="accounts">
-            <span aria-hidden="true">A</span>
-            Accounts
-          </button>
-          <button class="nav-item" type="button" data-view="stats">
-            <span aria-hidden="true">I</span>
-            Insights
-          </button>
-          <button class="nav-item" type="button" data-view="goals">
-            <span aria-hidden="true">G</span>
-            Goals
-          </button>
-          <button class="nav-item" type="button" data-view="bills">
-            <span aria-hidden="true">P</span>
-            Bills
-          </button>
-          <button class="nav-item" type="button" data-view="settings">
-            <span aria-hidden="true">S</span>
-            Settings
-          </button>
+          <span class="nav-group-label">Workspace</span>
+<button class="nav-item is-active" type="button" data-view="dashboard"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="7" height="9" x="3" y="3" rx="1" /><rect width="7" height="5" x="14" y="3" rx="1" /><rect width="7" height="9" x="14" y="12" rx="1" /><rect width="7" height="5" x="3" y="16" rx="1" /></svg><span>Overview</span></button><button class="nav-item" type="button" data-view="transactions"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h.01" /><path d="M3 12h.01" /><path d="M3 19h.01" /><path d="M8 5h13" /><path d="M8 12h13" /><path d="M8 19h13" /></svg><span>Transactions</span></button><button class="nav-item" type="button" data-view="imports"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8" /><path d="M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z" /><path d="M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1" /></svg><span>Imports & review</span></button><button class="nav-item" type="button" data-view="accounts"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" /><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" /></svg><span>Accounts</span></button>
+          <span class="nav-group-label nav-secondary">Planning</span>
+<button class="nav-item" type="button" data-view="stats"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16v5" /><path d="M16 14.639V21" /><path d="M20 10.656V21" /><path d="m22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15" /><path d="M4 18.463V21" /><path d="M8 14.656V21" /></svg><span>Insights</span></button><button class="nav-item" type="button" data-view="budgets"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z" /><path d="M21.21 15.89A10 10 0 1 1 8 2.83" /></svg><span>Budgets</span></button><button class="nav-item" type="button" data-view="goals"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></svg><span>Goals</span></button><button class="nav-item" type="button" data-view="bills"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v3" /><path d="M16 2v3" /><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /><path d="M8 13h.01" /><path d="M12 13h.01" /><path d="M16 13h.01" /><path d="M8 17h.01" /><path d="M12 17h.01" /><path d="M16 17h.01" /></svg><span>Bills</span></button>
+          <div class="sidebar-footer"><button class="nav-item" type="button" data-view="guide"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v16" /><path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z" /></svg><span>User’s Guide</span></button><button class="nav-item" type="button" data-view="settings"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /><circle cx="12" cy="12" r="3" /></svg><span>Settings</span></button><div class="local-badge"><span class="status-dot" aria-hidden="true"></span>Encrypted vault</div></div>
         </nav>
-
-        <div class="local-badge">
-          <span class="status-dot" aria-hidden="true"></span>
-          Saved on this device
-        </div>
       </aside>
-
-      <main class="main">
+      <main class="main" id="mainContent">
         <header class="topbar">
-          <div class="topbar-group">
-            <label class="field-label" for="monthPicker">Month</label>
-            <input id="monthPicker" class="control compact" type="month">
+          <div class="app-topbar-title"><img class="mobile-brand-icon" src="icons/maniman-icon.svg" alt="" width="36" height="36"><span>Maniman</span><strong id="screenTitle">Overview</strong></div>
+          <div class="app-topbar-actions">
+            <div class="topbar-group"><label class="field-label" for="monthPicker">Period</label><input id="monthPicker" class="control compact" type="month"></div>
+            <button class="button primary-import-button" type="button" data-jump-view="imports"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12" /><path d="m17 8-5-5-5 5" /><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /></svg><span>Import statement</span></button>
+            <details class="topbar-menu">
+              <summary class="button ghost">Vault <svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></summary>
+              <div class="topbar-menu-panel">
+                <label class="field"><span class="field-label">Display currency</span><select id="currencySelect" class="control" aria-label="Currency"><option value="INR">INR (₹)</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="AUD">AUD</option><option value="CAD">CAD</option><option value="SGD">SGD</option></select></label>
+                <button id="exportBtn" class="button ghost" type="button">Export encrypted backup</button>
+                <button id="vaultLockBtn" class="button ghost" type="button">Lock vault</button>
+                <label class="button ghost file-button" for="importFile">Restore backup / import JSON</label><input id="importFile" class="sr-only" type="file" accept="application/json,.json">
+              </div>
+            </details>
+            <details class="mobile-more-nav">
+              <summary class="button ghost menu-toggle" aria-label="App menu" title="App menu"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
+              <div class="topbar-menu-panel">
+<button class="button ghost" type="button" data-jump-view="stats">Insights</button><button class="button ghost" type="button" data-jump-view="budgets">Budgets</button><button class="button ghost" type="button" data-jump-view="goals">Goals</button><button class="button ghost" type="button" data-jump-view="bills">Bills</button><button class="button ghost" type="button" data-jump-view="settings">Settings</button><button class="button ghost" type="button" data-jump-view="guide">User’s Guide</button>
+                <label class="field"><span class="field-label">Display currency</span><select id="mobileCurrencySelect" class="control" aria-label="Currency"><option value="INR">INR (₹)</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="AUD">AUD</option><option value="CAD">CAD</option><option value="SGD">SGD</option></select></label>
+                <button id="mobileExportBtn" class="button ghost" type="button">Export encrypted backup</button><button id="mobileVaultLockBtn" class="button ghost" type="button">Lock vault</button>
+                <label class="button ghost file-button" for="mobileImportFile">Restore backup / import JSON</label><input id="mobileImportFile" class="sr-only" type="file" accept="application/json,.json">
+              </div>
+            </details>
           </div>
-          <div class="topbar-actions">
-            <label class="field-label sr-only" for="currencySelect">Currency</label>
-            <select id="currencySelect" class="control compact" aria-label="Currency">
-              <option value="USD">USD</option>
-              <option value="INR">INR</option>
-              <option value="EUR">EUR</option>
-              <option value="GBP">GBP</option>
-              <option value="AUD">AUD</option>
-              <option value="CAD">CAD</option>
-              <option value="SGD">SGD</option>
-            </select>
-            <button id="exportBtn" class="button ghost" type="button">Export</button>
-            <label class="button ghost file-button" for="importFile">Import</label>
-            <input id="importFile" class="sr-only" type="file" accept="application/json,.json">
-          </div>
-          <details class="topbar-menu">
-            <summary class="button ghost">Options</summary>
-            <div class="topbar-menu-panel">
-              <label class="field">
-                <span class="field-label">Currency</span>
-                <select id="mobileCurrencySelect" class="control" aria-label="Currency">
-                  <option value="USD">USD</option>
-                  <option value="INR">INR</option>
-                  <option value="EUR">EUR</option>
-                  <option value="GBP">GBP</option>
-                  <option value="AUD">AUD</option>
-                  <option value="CAD">CAD</option>
-                  <option value="SGD">SGD</option>
-                </select>
-              </label>
-              <button id="mobileExportBtn" class="button ghost" type="button">Export</button>
-              <label class="button ghost file-button" for="mobileImportFile">Import</label>
-              <input id="mobileImportFile" class="sr-only" type="file" accept="application/json,.json">
-            </div>
-          </details>
         </header>
-
         <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
         <section id="viewRoot" class="view-root" aria-live="polite"></section>
       </main>
+    <nav class="mobile-nav" aria-label="Mobile primary"><button class="nav-item is-active" type="button" data-view="dashboard"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="7" height="9" x="3" y="3" rx="1" /><rect width="7" height="5" x="14" y="3" rx="1" /><rect width="7" height="9" x="14" y="12" rx="1" /><rect width="7" height="5" x="3" y="16" rx="1" /></svg><span>Overview</span></button><button class="nav-item" type="button" data-view="transactions"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h.01" /><path d="M3 12h.01" /><path d="M3 19h.01" /><path d="M8 5h13" /><path d="M8 12h13" /><path d="M8 19h13" /></svg><span>Transactions</span></button><button class="nav-item" type="button" data-view="imports"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8" /><path d="M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z" /><path d="M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1" /></svg><span>Imports</span></button><button class="nav-item" type="button" data-view="accounts"><svg class="ui-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" /><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" /></svg><span>Accounts</span></button></nav>
     </div>
-
     <script src="app.js"></script>
   </body>
 </html>
