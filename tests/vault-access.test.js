@@ -190,3 +190,50 @@ test("restoring a backup keeps the replacement unlock dialog protected and relea
   assert.equal(shell.inert, false);
   assert.equal(document.events.focusin.length, 0);
 });
+
+test("explicit local-vault adoption keeps its passphrase and recovery key for the cloud account", async () => {
+  const storage = manager(); await storage.begin();
+  const original = { transactions: [{ id: "local-record" }] };
+  const created = await storage.create("synthetic shared passphrase", original);
+  const local = storage.getEnvelope();
+  await storage.begin("user:account-A");
+  const { body, access } = setup(storage);
+  const finished = access.requestAccess({ initialState: { transactions: [] }, localCandidate: local });
+  const reuse = body.querySelectorAll("button").find((button) => /existing local vault/.test(button.textContent));
+  const adopting = reuse.dispatch("click");
+  await new Promise(setImmediate);
+  const form = body.querySelector("form");
+  form.querySelector("input").value = "synthetic shared passphrase";
+  await form.dispatch("submit"); await adopting;
+  assert.deepEqual(await finished, original);
+  assert.equal(storage.getEnvelope().vaultId, local.vaultId);
+  storage.lock();
+  assert.deepEqual(await storage.unlock(created.recoveryKey, { recovery: true }), original);
+  await storage.begin("local");
+  assert.deepEqual(storage.getEnvelope(), local);
+});
+
+test("legacy cloud migration reuses a local key atomically without copying the wrong dataset", async () => {
+  const storage = manager(); await storage.begin();
+  const created = await storage.create("synthetic migration passphrase", { transactions: [{ id: "local-only" }] });
+  const local = storage.getEnvelope();
+  await storage.begin("user:account-A");
+  const cloudState = { transactions: [{ id: "cloud-only" }] };
+  const { body, access } = setup(storage);
+  const finished = access.requestAccess({ initialState: cloudState, localCandidate: local, migration: true });
+  const adopting = body.querySelectorAll("button").find((button) => /key for cloud/.test(button.textContent)).dispatch("click");
+  await new Promise(setImmediate);
+  const form = body.querySelector("form");
+  form.querySelector("input").value = "wrong secret";
+  await form.dispatch("submit");
+  assert.equal(storage.getEnvelope(), null);
+  assert.equal(form.querySelector(".vault-error").hidden, false);
+  form.querySelector("input").value = "synthetic migration passphrase";
+  await form.dispatch("submit"); await adopting;
+  assert.deepEqual(await finished, cloudState);
+  assert.equal(storage.getEnvelope().vaultId, local.vaultId);
+  storage.lock();
+  assert.deepEqual(await storage.unlock(created.recoveryKey, { recovery: true }), cloudState);
+  await storage.begin("local");
+  assert.deepEqual(storage.getEnvelope(), local);
+});

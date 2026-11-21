@@ -14,9 +14,9 @@ Run the local server from this folder (Node 22 or later):
 node server.js
 ```
 
-Then visit `http://127.0.0.1:4173`. Create a vault passphrase, save the generated recovery key separately, and complete the recovery check. Subsequent sessions unlock the existing vault. HTTPS or localhost and a browser with Web Crypto/IndexedDB are required.
+Then visit `http://127.0.0.1:4173`. If cloud is configured, sign in or explicitly choose local-only use first. For a new vault, create a vault passphrase, save the generated recovery key separately, and complete the recovery check. Subsequent sessions unlock the existing vault. Active tabs normally resume across reloads using a RAM-only key; browser restarts or worker reclamation require unlocking again. HTTPS or localhost and a browser with Web Crypto/IndexedDB are required.
 
-The server binds to loopback by default. Non-loopback hosting requires `MANIMAN_LOCAL_TOKEN`; use HTTPS for browser encryption on other devices. Hosted phone/laptop use remains part of the plan; initial encrypted cloud-sync code still needs live two-device/RLS verification. See [implementation status](docs/IMPLEMENTATION_STATUS.md).
+The server binds to loopback by default. Non-loopback hosting requires `MANIMAN_LOCAL_TOKEN`; use HTTPS for browser encryption on other devices. Hosted phone/laptop access uses the same account and vault passphrase, with conservative encrypted sync. Owner RLS was checked read-only; live email delivery and physical two-device behavior still need release verification. See [implementation status](docs/IMPLEMENTATION_STATUS.md).
 
 ## Local PDF conversion and statement JSON import
 
